@@ -1,21 +1,20 @@
-FROM node:20-bookworm-slim
+FROM node:20
 
 RUN apt-get update \
-  && apt-get install -y --no-install-recommends python3 python3-pip ffmpeg ca-certificates \
-  && pip3 install --no-cache-dir --break-system-packages yt-dlp \
-  && apt-get clean \
+  && apt-get install -y ffmpeg python3 python3-pip \
+  && pip3 install --no-cache-dir yt-dlp \
   && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
 
-COPY package.json package-lock.json* ./
-RUN npm install --omit=dev
+COPY package*.json ./
+RUN npm install
 
-COPY src ./src
+COPY . .
 
 RUN mkdir -p /tmp/ig-cache
 
 ENV NODE_ENV=production
 ENV CACHE_DIR=/tmp/ig-cache
 
-CMD ["node", "src/index.js"]
+CMD ["npm", "start"]

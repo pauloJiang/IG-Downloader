@@ -6,6 +6,7 @@
 
 - 识别 `instagram.com/reel/`、`instagram.com/p/`、`instagram.com/stories/` 链接
 - 自动下载图片或视频并发送给用户
+- 视频经 FFmpeg 转码为 iPhone/Telegram 兼容格式（H.264 baseline + AAC）后发送
 - 支持轮播帖（多条媒体逐条发送）
 - `/start`、`/help` 命令
 - 文件缓存至 `/tmp/ig-cache`，30 分钟后自动删除

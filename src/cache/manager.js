@@ -33,7 +33,7 @@ export async function downloadToCache(mediaUrl, type) {
   await runYtdlpDownload(mediaUrl, outTemplate, type);
 
   const filePath = await resolveDownloadedFile(id);
-  scheduleDeletion(filePath);
+  scheduleCacheDeletion(filePath);
 
   return { filePath, type };
 }
@@ -90,7 +90,7 @@ async function resolveDownloadedFile(id) {
 /**
  * @param {string} filePath
  */
-function scheduleDeletion(filePath) {
+export function scheduleCacheDeletion(filePath) {
   const existing = deletionTimers.get(filePath);
   if (existing) clearTimeout(existing);
 
