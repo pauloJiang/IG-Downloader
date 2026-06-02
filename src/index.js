@@ -2,6 +2,7 @@ import { config } from './config.js';
 import { initCacheDir } from './cache/manager.js';
 import { createBot } from './bot.js';
 import { ensureYtdlp } from './instagram/ytdlp.js';
+import { initIgCookies } from './instagram/cookies.js';
 
 async function main() {
   if (!config.botToken) {
@@ -10,6 +11,7 @@ async function main() {
   }
 
   await ensureYtdlp();
+  await initIgCookies();
   await initCacheDir();
 
   const bot = createBot();

@@ -1,11 +1,9 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
-import { spawn } from 'node:child_process';
 import { config } from '../config.js';
 import { redactUrl } from '../http/fetch-helper.js';
-
-const YTDLP_BIN = process.env.YTDLP_BIN || 'yt-dlp';
+import { runYtdlp } from '../instagram/ytdlp.js';
 
 /** @type {Map<string, NodeJS.Timeout>} */
 const deletionTimers = new Map();
@@ -30,46 +28,18 @@ export async function downloadToCache(mediaUrl, type) {
 
   console.log('[ytdlp] 下载:', redactUrl(mediaUrl), 'type=', type);
 
-  await runYtdlpDownload(mediaUrl, outTemplate, type);
+  const args = ['-o', outTemplate, '--no-playlist', '--no-warnings', '--no-progress'];
+  if (type === 'video') {
+    args.push('-f', 'bv*+ba/b');
+  }
+  args.push(mediaUrl);
+
+  await runYtdlp(args);
 
   const filePath = await resolveDownloadedFile(id);
   scheduleCacheDeletion(filePath);
 
   return { filePath, type };
-}
-
-/**
- * @param {string} mediaUrl
- * @param {string} outTemplate
- * @param {'image' | 'video'} type
- */
-function runYtdlpDownload(mediaUrl, outTemplate, type) {
-  return new Promise((resolve, reject) => {
-    const args = ['-o', outTemplate, '--no-playlist', '--no-warnings', '--no-progress'];
-
-    if (type === 'video') {
-      args.push('-f', 'bv*+ba/b');
-    }
-
-    args.push(mediaUrl);
-
-    const proc = spawn(YTDLP_BIN, args, { stdio: ['ignore', 'pipe', 'pipe'] });
-    let stderr = '';
-
-    proc.stderr.on('data', (chunk) => {
-      stderr += chunk;
-    });
-
-    proc.on('error', reject);
-
-    proc.on('close', (code) => {
-      if (code !== 0) {
-        reject(new Error(stderr.trim().slice(0, 500) || `yt-dlp 下载失败 (${code})`));
-        return;
-      }
-      resolve();
-    });
-  });
 }
 
 /**
@@ -90,7 +60,7 @@ async function resolveDownloadedFile(id) {
 /**
  * @param {string} filePath
  */
-export function scheduleCacheDeletion(filePath) {
+function scheduleCacheDeletion(filePath) {
   const existing = deletionTimers.get(filePath);
   if (existing) clearTimeout(existing);
 

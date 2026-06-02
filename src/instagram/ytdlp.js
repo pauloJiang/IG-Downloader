@@ -1,10 +1,14 @@
 import { execFile, spawn } from 'node:child_process';
 import { promisify } from 'node:util';
 import { redactUrl } from '../http/fetch-helper.js';
+import { getYtdlpCookieArgs } from './cookies.js';
 
 const execFileAsync = promisify(execFile);
 
 const YTDLP_BIN = process.env.YTDLP_BIN || 'yt-dlp';
+
+export const IG_AUTH_ERROR =
+  'Instagram 需要登录或当前IP被限流，请稍后再试或更新 cookies。';
 
 /**
  * @typedef {{ type: 'image' | 'video', url: string }} MediaItem
@@ -17,29 +21,36 @@ export async function ensureYtdlp() {
   try {
     const { stdout } = await execFileAsync(YTDLP_BIN, ['--version']);
     console.log('[ytdlp] 已就绪:', stdout.trim().split('\n')[0]);
-    return;
   } catch {
-    console.log('[ytdlp] 未找到，正在通过 pip 安装…');
+    throw new Error('未找到 yt-dlp，请安装后重试');
   }
+}
 
-  const pipArgs = ['install', '-q', 'yt-dlp'];
-  try {
-    await execFileAsync('pip3', ['install', '--break-system-packages', '-q', 'yt-dlp']);
-  } catch {
-    await execFileAsync('pip3', pipArgs);
+/**
+ * @param {string} message
+ */
+export function mapYtdlpError(message) {
+  const lower = message.toLowerCase();
+  if (
+    lower.includes('login required') ||
+    lower.includes('rate-limit reached') ||
+    lower.includes('rate limit') ||
+    lower.includes('requested content is not available')
+  ) {
+    return new Error(IG_AUTH_ERROR);
   }
-
-  const { stdout } = await execFileAsync(YTDLP_BIN, ['--version']);
-  console.log('[ytdlp] 安装完成:', stdout.trim().split('\n')[0]);
+  return new Error(message);
 }
 
 /**
  * @param {string[]} args
  * @returns {Promise<{ stdout: string, stderr: string }>}
  */
-function runYtdlp(args) {
+export async function runYtdlp(args) {
+  const fullArgs = [...getYtdlpCookieArgs(), ...args];
+
   return new Promise((resolve, reject) => {
-    const proc = spawn(YTDLP_BIN, args, { stdio: ['ignore', 'pipe', 'pipe'] });
+    const proc = spawn(YTDLP_BIN, fullArgs, { stdio: ['ignore', 'pipe', 'pipe'] });
     let stdout = '';
     let stderr = '';
 
@@ -55,7 +66,7 @@ function runYtdlp(args) {
     proc.on('close', (code) => {
       if (code !== 0) {
         const msg = stderr.trim() || stdout.trim() || `yt-dlp 退出码 ${code}`;
-        reject(new Error(msg.slice(0, 500)));
+        reject(mapYtdlpError(msg.slice(0, 500)));
         return;
       }
       resolve({ stdout, stderr });
@@ -70,12 +81,7 @@ function runYtdlp(args) {
 export async function fetchInstagramMedia(instagramUrl) {
   console.log('[ytdlp] 解析:', redactUrl(instagramUrl));
 
-  const { stdout } = await runYtdlp([
-    '-J',
-    '--no-warnings',
-    '--no-progress',
-    instagramUrl,
-  ]);
+  const { stdout } = await runYtdlp(['-J', '--no-warnings', '--no-progress', instagramUrl]);
 
   let data;
   try {

@@ -3,7 +3,6 @@ import { config } from './config.js';
 import { parseInstagramUrl, containsInstagramUrl } from './instagram/url.js';
 import { fetchInstagramMedia } from './instagram/fetcher.js';
 import { downloadToCache } from './cache/manager.js';
-import { transcodeForTelegram } from './video/transcode.js';
 
 const HELP_TEXT = `📖 *使用帮助*
 
@@ -21,7 +20,7 @@ const HELP_TEXT = `📖 *使用帮助*
 
 *说明：*
 • 使用 yt-dlp 解析与下载
-• 视频会转码为手机/Telegram 兼容格式后发送
+• 可配置 IG_COOKIES 以访问需登录内容
 • 轮播帖会逐条发送所有媒体
 • 下载文件缓存 30 分钟后自动删除`;
 
@@ -31,19 +30,10 @@ const HELP_TEXT = `📖 *使用帮助*
  */
 async function sendMediaFile(ctx, file) {
   if (file.type === 'video') {
-    let outputPath;
-    try {
-      outputPath = await transcodeForTelegram(file.filePath);
-    } catch (err) {
-      const reason = err instanceof Error ? err.message : '未知错误';
-      throw new Error(`视频转码失败：${reason}`);
-    }
-
-    await ctx.replyWithVideo({ source: outputPath });
-    return;
+    await ctx.replyWithVideo(Input.fromLocalFile(file.filePath));
+  } else {
+    await ctx.replyWithPhoto(Input.fromLocalFile(file.filePath));
   }
-
-  await ctx.replyWithPhoto(Input.fromLocalFile(file.filePath));
 }
 
 /**

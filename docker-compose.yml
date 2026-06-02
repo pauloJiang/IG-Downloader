@@ -4,6 +4,7 @@ services:
     restart: unless-stopped
     environment:
       BOT_TOKEN: ${BOT_TOKEN}
+      IG_COOKIES: ${IG_COOKIES:-}
       CACHE_DIR: /tmp/ig-cache
     volumes:
       - ig-cache:/tmp/ig-cache
