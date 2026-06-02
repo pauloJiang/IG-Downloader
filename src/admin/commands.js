@@ -12,11 +12,6 @@ export const awaitingCookieUpload = new Set();
  * @param {import('telegraf').Context} ctx
  */
 export function registerAdminCommands(bot) {
-  bot.command('myid', async (ctx) => {
-    const id = ctx.from?.id;
-    await ctx.reply(`你的 Telegram 数字ID：${id ?? '未知'}`);
-  });
-
   bot.command('allow', async (ctx) => {
     if (!isAdmin(ctx.from?.id)) {
       await ctx.reply('❌ 仅管理员可用');

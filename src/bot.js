@@ -4,7 +4,7 @@ import { parseInstagramUrl, containsInstagramUrl } from './instagram/url.js';
 import { fetchInstagramMedia } from './instagram/fetcher.js';
 import { downloadToCache } from './cache/manager.js';
 import { prepareVideoForTelegram } from './video/prepare-video.js';
-import { isAllowed } from './admin/auth.js';
+import { getBotCommand, isAllowed } from './admin/auth.js';
 import { registerAdminCommands } from './admin/commands.js';
 import { setNotifyBot, notifyAdminCookieFailure } from './admin/notify.js';
 import { getUserFacingIgError } from './admin/cookie-errors.js';
@@ -69,24 +69,25 @@ export function createBot() {
   const bot = new Telegraf(config.botToken);
   setNotifyBot(bot);
 
-  registerAdminCommands(bot);
-
   bot.use(async (ctx, next) => {
     const userId = ctx.from?.id;
     if (!userId) return;
 
-    const text = ctx.message?.text;
-    const command = text?.split(/\s+/)[0]?.split('@')[0];
+    const command = getBotCommand(ctx);
     if (command === '/myid') {
-      return next();
+      await ctx.reply(`你的 Telegram 数字ID：${userId}`);
+      return;
     }
 
-    if (isAllowed(userId)) {
-      return next();
+    if (!isAllowed(userId)) {
+      await ctx.reply('❌ 私人机器人，暂无使用权限');
+      return;
     }
 
-    await ctx.reply('❌ 私人机器人，暂无使用权限');
+    return next();
   });
+
+  registerAdminCommands(bot);
 
   bot.start(async (ctx) => {
     await ctx.reply(
