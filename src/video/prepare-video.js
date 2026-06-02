@@ -7,12 +7,25 @@ import { scheduleCacheDeletion } from '../cache/manager.js';
 import { probeMedia, logProbeResult } from './ffprobe-log.js';
 
 const FFMPEG_BIN = process.env.FFMPEG_BIN || 'ffmpeg';
+const MIN_VIDEO_BYTES = 100_000;
+
+/**
+ * @typedef {{ path: string, sendAs: 'video' | 'document' }} PreparedVideo
+ */
 
 /**
  * @param {number} ms
  */
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+/**
+ * @param {string} filePath
+ */
+function getFileSize(filePath) {
+  if (!fs.existsSync(filePath)) return 0;
+  return fs.statSync(filePath).size;
 }
 
 /**
@@ -34,9 +47,12 @@ async function assertTranscodeOutput(outputPath) {
     throw new Error('转码输出文件不存在');
   }
 
-  if (fs.statSync(outputPath).size === 0) {
-    throw new Error('转码输出文件为空');
+  const size = fs.statSync(outputPath).size;
+  if (size <= MIN_VIDEO_BYTES) {
+    throw new Error(`转码输出过小: ${size} bytes`);
   }
+
+  console.log('[video] 转码输出有效, size=', size);
 }
 
 /**
@@ -61,7 +77,7 @@ function logOutputProbeOptional(outputPath) {
 
 /**
  * @param {string} inputPath
- * @returns {Promise<string>} 用于发送的视频路径
+ * @returns {Promise<PreparedVideo>}
  */
 export async function prepareVideoForTelegram(inputPath) {
   let before;
@@ -73,29 +89,48 @@ export async function prepareVideoForTelegram(inputPath) {
   }
 
   const hasAudio = Boolean(before.audio);
+  const inputSize = getFileSize(inputPath);
+
   console.log('[video] 输入检测:', {
     file: path.basename(inputPath),
     codec_name: before.video?.codec_name ?? 'none',
     hasAudio,
     audio_codec: before.audio?.codec_name ?? 'none',
+    size: inputSize,
   });
   logProbeResult(inputPath, '发送前', before);
 
   if (!needsTranscode(before)) {
+    if (inputSize <= MIN_VIDEO_BYTES) {
+      throw new Error(`原视频文件过小: ${inputSize} bytes`);
+    }
     console.log('[video] 已是 h264 + aac（或无音轨），直接发送');
-    return inputPath;
+    return { path: inputPath, sendAs: 'video' };
   }
 
   const outputPath = path.join(config.cacheDir, `${randomUUID()}-h264.mp4`);
   console.log('[video] 开始转码, hasAudio=', hasAudio);
 
-  transcodeToH264(inputPath, outputPath, hasAudio);
+  try {
+    transcodeToH264(inputPath, outputPath, hasAudio);
+    await assertTranscodeOutput(outputPath);
+    logOutputProbeOptional(outputPath);
+    scheduleCacheDeletion(outputPath);
+    return { path: outputPath, sendAs: 'video' };
+  } catch (err) {
+    const reason = err instanceof Error ? err.message : String(err);
+    console.warn('[video] 转码失败，改用原视频 document 发送:', reason);
 
-  await assertTranscodeOutput(outputPath);
-  logOutputProbeOptional(outputPath);
+    if (fs.existsSync(outputPath)) {
+      fs.unlinkSync(outputPath);
+    }
 
-  scheduleCacheDeletion(outputPath);
-  return outputPath;
+    if (inputSize <= MIN_VIDEO_BYTES) {
+      throw new Error(`转码失败且原视频过小: ${inputSize} bytes`);
+    }
+
+    return { path: inputPath, sendAs: 'document' };
+  }
 }
 
 /**
@@ -147,24 +182,10 @@ function transcodeToH264(inputPath, outputPath, hasAudio) {
     throw new Error('未找到 ffmpeg');
   }
 
-  const exists = fs.existsSync(outputPath);
-  const size = exists ? fs.statSync(outputPath).size : 0;
-
-  if (!exists) {
-    if (result.status !== 0) {
-      console.error('FFMPEG_FULL_ERROR:', result.stderr);
-      throw new Error((result.stderr || `FFmpeg 退出码 ${result.status}`).slice(-1000));
-    }
-    throw new Error('输出文件不存在');
-  }
-
-  if (size === 0) {
-    throw new Error('输出文件为空');
-  }
-
   if (result.status !== 0) {
-    console.log('[ffmpeg] 退出码', result.status, '但输出文件有效，视为成功');
+    console.error('FFMPEG_FULL_ERROR:', result.stderr);
+    throw new Error(`FFmpeg 退出码 ${result.status}`);
   }
 
-  console.log('[ffmpeg] 转码完成, exit=', result.status, 'size=', size);
+  console.log('[ffmpeg] 进程已结束, exit=0');
 }

@@ -32,14 +32,14 @@ const HELP_TEXT = `📖 *使用帮助*
  */
 async function sendMediaFile(ctx, file) {
   if (file.type === 'video') {
-    let sendPath;
-    try {
-      sendPath = await prepareVideoForTelegram(file.filePath);
-    } catch (err) {
-      const reason = err instanceof Error ? err.message : '未知错误';
-      throw new Error(`视频处理失败：${reason}`);
+    const prepared = await prepareVideoForTelegram(file.filePath);
+
+    if (prepared.sendAs === 'document') {
+      await ctx.replyWithDocument(Input.fromLocalFile(prepared.path));
+      return;
     }
-    await ctx.replyWithVideo(Input.fromLocalFile(sendPath));
+
+    await ctx.replyWithVideo(Input.fromLocalFile(prepared.path));
   } else {
     await ctx.replyWithPhoto(Input.fromLocalFile(file.filePath));
   }
