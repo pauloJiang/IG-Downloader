@@ -3,9 +3,18 @@ import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { config } from '../config.js';
 import { scheduleCacheDeletion } from '../cache/manager.js';
-import { probeVideo, logProbeResult } from './ffprobe-log.js';
+import { probeMedia, logProbeResult } from './ffprobe-log.js';
 
 const FFMPEG_BIN = process.env.FFMPEG_BIN || 'ffmpeg';
+
+/**
+ * @param {{ video: import('./ffprobe-log.js').VideoStreamInfo | null, audio: import('./ffprobe-log.js').AudioStreamInfo | null }} probe
+ */
+function needsTranscode(probe) {
+  if (probe.video?.codec_name !== 'h264') return true;
+  if (probe.audio && probe.audio.codec_name !== 'aac') return true;
+  return false;
+}
 
 /**
  * @param {string} inputPath
@@ -14,37 +23,48 @@ const FFMPEG_BIN = process.env.FFMPEG_BIN || 'ffmpeg';
 export async function prepareVideoForTelegram(inputPath) {
   let before;
   try {
-    before = await probeVideo(inputPath);
+    before = await probeMedia(inputPath);
   } catch (err) {
     const reason = err instanceof Error ? err.message : String(err);
     throw new Error(`ffprobe 失败: ${reason}`);
   }
   logProbeResult(inputPath, '发送前', before);
 
-  if (before.video?.codec_name === 'h264') {
-    console.log('[video] codec 已是 h264，直接发送');
+  if (!needsTranscode(before)) {
+    console.log('[video] 已是 h264 + aac（或无音轨），直接发送');
     return inputPath;
   }
 
   console.log(
-    '[video] 需要转码:',
-    before.video?.codec_name ?? 'unknown',
-    '-> h264',
+    '[video] 需要转码: 视频',
+    before.video?.codec_name ?? 'none',
+    '音频',
+    before.audio?.codec_name ?? 'none',
   );
 
   const outputPath = path.join(config.cacheDir, `${randomUUID()}-h264.mp4`);
   await transcodeToH264(inputPath, outputPath);
 
-  const after = await probeVideo(outputPath);
+  const after = await probeMedia(outputPath);
   logProbeResult(outputPath, '转码后', after);
 
   if (after.video?.codec_name !== 'h264' || after.video?.pix_fmt !== 'yuv420p') {
     throw new Error(
-      `转码后验证失败: codec_name=${after.video?.codec_name ?? 'none'}, pix_fmt=${after.video?.pix_fmt ?? 'none'}`,
+      `转码后视频验证失败: codec_name=${after.video?.codec_name ?? 'none'}, pix_fmt=${after.video?.pix_fmt ?? 'none'}`,
     );
   }
 
-  console.log('[video] 转码验证通过: h264 / yuv420p');
+  if (before.audio) {
+    if (after.audio?.codec_name !== 'aac') {
+      throw new Error(
+        `转码后音频验证失败: codec_name=${after.audio?.codec_name ?? 'none'}`,
+      );
+    }
+    console.log('[video] 转码验证通过: codec_name=h264, codec_name=aac');
+  } else {
+    console.log('[video] 转码验证通过: codec_name=h264（无音频轨）');
+  }
+
   scheduleCacheDeletion(outputPath);
   return outputPath;
 }
@@ -68,12 +88,18 @@ function transcodeToH264(inputPath, outputPath) {
     'yuv420p',
     '-c:a',
     'aac',
-    '-movflags',
-    '+faststart',
+    '-b:a',
+    '128k',
+    '-ar',
+    '44100',
+    '-ac',
+    '2',
     '-map',
     '0:v:0',
     '-map',
-    '0:a:0?',
+    '0:a?',
+    '-movflags',
+    '+faststart',
     outputPath,
   ];
 
