@@ -1,4 +1,5 @@
-import { execFileSync } from 'node:child_process';
+import { spawnSync } from 'node:child_process';
+import fs from 'node:fs';
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { config } from '../config.js';
@@ -112,16 +113,23 @@ function transcodeToH264(inputPath, outputPath, hasAudio) {
 
   console.log('[ffmpeg] 命令:', FFMPEG_BIN, args.join(' '));
 
-  try {
-    execFileSync(FFMPEG_BIN, args, {
-      stdio: ['ignore', 'pipe', 'pipe'],
-      maxBuffer: 50 * 1024 * 1024,
-    });
-  } catch (err) {
-    const stderr = err.stderr?.toString() || err.message;
-    console.error('FFMPEG_FULL_ERROR:', stderr);
-    throw new Error(stderr.slice(-3500));
+  const result = spawnSync(FFMPEG_BIN, args, { encoding: 'utf8' });
+
+  if (result.error) {
+    if (result.error.code === 'ENOENT') {
+      throw new Error('未找到 ffmpeg');
+    }
+    throw result.error;
   }
 
-  console.log('[ffmpeg] 转码完成');
+  if (result.status !== 0) {
+    console.error('FFMPEG_FULL_ERROR:', result.stderr);
+    throw new Error(`FFmpeg 转码失败：${(result.stderr || '').slice(-1000)}`);
+  }
+
+  if (!fs.existsSync(outputPath) || fs.statSync(outputPath).size === 0) {
+    throw new Error('FFmpeg 输出文件为空');
+  }
+
+  console.log('[ffmpeg] 转码完成, size=', fs.statSync(outputPath).size);
 }
