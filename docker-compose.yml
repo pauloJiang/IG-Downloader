@@ -1,0 +1,12 @@
+services:
+  telegram-ig-bot:
+    build: .
+    restart: unless-stopped
+    environment:
+      BOT_TOKEN: ${BOT_TOKEN}
+      CACHE_DIR: /tmp/ig-cache
+    volumes:
+      - ig-cache:/tmp/ig-cache
+
+volumes:
+  ig-cache:

@@ -1,0 +1,84 @@
+# Telegram Instagram Bot
+
+通过 Telegram 下载 Instagram 帖子、Reels 和 Stories 的 Bot。
+
+## 功能
+
+- 识别 `instagram.com/reel/`、`instagram.com/p/`、`instagram.com/stories/` 链接
+- 自动下载图片或视频并发送给用户
+- 支持轮播帖（多条媒体逐条发送）
+- `/start`、`/help` 命令
+- 文件缓存至 `/tmp/ig-cache`，30 分钟后自动删除
+- 无需数据库
+
+## 技术栈
+
+- Node.js 18+
+- [Telegraf](https://telegraf.js.org/)
+
+## 快速开始
+
+### 1. 获取 Bot Token
+
+在 [@BotFather](https://t.me/BotFather) 创建 Bot，获取 `BOT_TOKEN`。
+
+### 2. 本地运行
+
+```bash
+cd telegram-bot
+npm install
+export BOT_TOKEN=your_token_here
+npm start
+```
+
+Windows PowerShell:
+
+```powershell
+cd telegram-bot
+$env:BOT_TOKEN="your_token_here"
+npm start
+```
+
+### 3. Docker 部署
+
+```bash
+cd telegram-bot
+cp .env.example .env   # 填写 BOT_TOKEN
+
+docker compose up -d --build
+docker compose logs -f
+```
+
+## 环境变量
+
+| 变量 | 必填 | 说明 |
+|------|------|------|
+| `BOT_TOKEN` | 是 | Telegram Bot Token |
+| `CACHE_DIR` | 否 | 缓存目录，默认 `/tmp/ig-cache` |
+
+## 使用方式
+
+1. 在 Telegram 中打开你的 Bot
+2. 发送 `/start` 查看欢迎信息
+3. 直接粘贴 Instagram 链接，Bot 会自动解析并发送媒体
+
+## 限制说明
+
+- 仅支持**公开**内容
+- Stories 可能因 Instagram 限制或链接过期而失败
+- Telegram Bot 单文件上传上限为 50 MB
+- Instagram 反爬策略可能变化，如遇解析失败请稍后重试
+
+## 项目结构
+
+```
+src/
+├── index.js           # 入口
+├── bot.js             # Telegraf 逻辑
+├── config.js          # 配置
+├── cache/
+│   └── manager.js     # 下载缓存与 TTL 清理
+└── instagram/
+    ├── url.js         # URL 识别
+    └── fetcher.js     # Instagram 媒体解析
+```

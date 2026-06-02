@@ -1,0 +1,17 @@
+{
+  "name": "telegram-ig-bot",
+  "version": "1.0.0",
+  "description": "Telegram bot to download Instagram posts, reels, and stories",
+  "type": "module",
+  "main": "src/index.js",
+  "scripts": {
+    "start": "node src/index.js",
+    "dev": "node --watch src/index.js"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "dependencies": {
+    "telegraf": "^4.16.3"
+  }
+}
