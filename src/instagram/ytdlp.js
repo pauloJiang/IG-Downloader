@@ -35,7 +35,9 @@ export function mapYtdlpError(message) {
     lower.includes('login required') ||
     lower.includes('rate-limit reached') ||
     lower.includes('rate limit') ||
-    lower.includes('requested content is not available')
+    lower.includes('requested content is not available') ||
+    lower.includes('cookies') ||
+    lower.includes('account credentials')
   ) {
     return new Error(IG_AUTH_ERROR);
   }

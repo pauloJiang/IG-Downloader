@@ -3,6 +3,7 @@ import { initCacheDir } from './cache/manager.js';
 import { createBot } from './bot.js';
 import { ensureYtdlp } from './instagram/ytdlp.js';
 import { initIgCookies } from './instagram/cookies.js';
+import { initWhitelist } from './admin/whitelist.js';
 
 async function main() {
   if (!config.botToken) {
@@ -10,8 +11,13 @@ async function main() {
     process.exit(1);
   }
 
+  if (!config.adminTgId) {
+    console.warn('警告：未设置 ADMIN_TG_ID，管理功能不可用');
+  }
+
   await ensureYtdlp();
   await initIgCookies();
+  await initWhitelist();
   await initCacheDir();
 
   const bot = createBot();

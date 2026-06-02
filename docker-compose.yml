@@ -4,10 +4,14 @@ services:
     restart: unless-stopped
     environment:
       BOT_TOKEN: ${BOT_TOKEN}
-      IG_COOKIES: ${IG_COOKIES:-}
+      ADMIN_TG_ID: ${ADMIN_TG_ID}
       CACHE_DIR: /tmp/ig-cache
+      COOKIES_PATH: /data/cookies.txt
+      DATA_DIR: /data
     volumes:
       - ig-cache:/tmp/ig-cache
+      - bot-data:/data
 
 volumes:
   ig-cache:
+  bot-data:

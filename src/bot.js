@@ -4,6 +4,11 @@ import { parseInstagramUrl, containsInstagramUrl } from './instagram/url.js';
 import { fetchInstagramMedia } from './instagram/fetcher.js';
 import { downloadToCache } from './cache/manager.js';
 import { prepareVideoForTelegram } from './video/prepare-video.js';
+import { isAllowed } from './admin/auth.js';
+import { registerAdminCommands } from './admin/commands.js';
+import { setNotifyBot, notifyAdminCookieFailure } from './admin/notify.js';
+import { getUserFacingIgError } from './admin/cookie-errors.js';
+import { markProcessed } from './admin/stats.js';
 
 const HELP_TEXT = `📖 *使用帮助*
 
@@ -18,10 +23,10 @@ const HELP_TEXT = `📖 *使用帮助*
 *命令：*
 /start — 欢迎信息
 /help — 显示此帮助
+/myid — 查看你的 Telegram 数字ID
 
 *说明：*
 • 使用 yt-dlp 解析与下载
-• 可配置 IG_COOKIES 以访问需登录内容
 • 非 H.264 视频会自动转码后再发送
 • 轮播帖会逐条发送所有媒体
 • 下载文件缓存 30 分钟后自动删除`;
@@ -46,10 +51,42 @@ async function sendMediaFile(ctx, file) {
 }
 
 /**
+ * @param {import('telegraf').Context} ctx
+ * @param {string} rawMessage
+ */
+async function handleIgDownloadError(ctx, statusMsg, rawMessage) {
+  const message = getUserFacingIgError(rawMessage);
+  await notifyAdminCookieFailure(rawMessage);
+  await ctx.telegram
+    .editMessageText(ctx.chat.id, statusMsg.message_id, undefined, `❌ 处理失败：${message}`)
+    .catch(() => ctx.reply(`❌ 处理失败：${message}`));
+}
+
+/**
  * @returns {import('telegraf').Telegraf}
  */
 export function createBot() {
   const bot = new Telegraf(config.botToken);
+  setNotifyBot(bot);
+
+  registerAdminCommands(bot);
+
+  bot.use(async (ctx, next) => {
+    const userId = ctx.from?.id;
+    if (!userId) return;
+
+    const text = ctx.message?.text;
+    const command = text?.split(/\s+/)[0]?.split('@')[0];
+    if (command === '/myid') {
+      return next();
+    }
+
+    if (isAllowed(userId)) {
+      return next();
+    }
+
+    await ctx.reply('❌ 私人机器人，暂无使用权限');
+  });
 
   bot.start(async (ctx) => {
     await ctx.reply(
@@ -99,12 +136,11 @@ export function createBot() {
         await sendMediaFile(ctx, cached);
       }
 
+      markProcessed();
       await ctx.telegram.deleteMessage(ctx.chat.id, statusMsg.message_id).catch(() => {});
     } catch (err) {
-      const message = err instanceof Error ? err.message : '未知错误';
-      await ctx.telegram
-        .editMessageText(ctx.chat.id, statusMsg.message_id, undefined, `❌ 处理失败：${message}`)
-        .catch(() => ctx.reply(`❌ 处理失败：${message}`));
+      const rawMessage = err instanceof Error ? err.message : '未知错误';
+      await handleIgDownloadError(ctx, statusMsg, rawMessage);
     }
   });
 
