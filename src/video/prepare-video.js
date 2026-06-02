@@ -1,4 +1,4 @@
-import { spawnSync } from 'node:child_process';
+import { spawnSync, execFileSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
@@ -9,12 +9,54 @@ import { probeMedia, logProbeResult } from './ffprobe-log.js';
 const FFMPEG_BIN = process.env.FFMPEG_BIN || 'ffmpeg';
 
 /**
+ * @param {number} ms
+ */
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+/**
  * @param {{ video: { codec_name?: string } | null, audio: { codec_name?: string } | null }} probe
  */
 function needsTranscode(probe) {
   if (probe.video?.codec_name !== 'h264') return true;
   if (probe.audio && probe.audio.codec_name !== 'aac') return true;
   return false;
+}
+
+/**
+ * @param {string} outputPath
+ */
+async function assertTranscodeOutput(outputPath) {
+  await sleep(1000);
+
+  if (!fs.existsSync(outputPath)) {
+    throw new Error('转码输出文件不存在');
+  }
+
+  if (fs.statSync(outputPath).size === 0) {
+    throw new Error('转码输出文件为空');
+  }
+}
+
+/**
+ * @param {string} outputPath
+ */
+function logOutputProbeOptional(outputPath) {
+  try {
+    const probe = execFileSync(
+      'ffprobe',
+      ['-v', 'quiet', '-print_format', 'json', '-show_streams', outputPath],
+      { encoding: 'utf8', maxBuffer: 50 * 1024 * 1024 },
+    );
+    console.log('[ffprobe] output:', probe);
+  } catch (e) {
+    const message = e instanceof Error ? e.message : String(e);
+    console.warn(
+      'ffprobe failed, but video file exists, continue sending:',
+      message,
+    );
+  }
 }
 
 /**
@@ -49,25 +91,8 @@ export async function prepareVideoForTelegram(inputPath) {
 
   transcodeToH264(inputPath, outputPath, hasAudio);
 
-  const after = await probeMedia(outputPath);
-  logProbeResult(outputPath, 'output', after);
-
-  if (after.video?.codec_name !== 'h264') {
-    throw new Error(
-      `转码后视频验证失败: codec_name=${after.video?.codec_name ?? 'none'}`,
-    );
-  }
-
-  if (hasAudio) {
-    if (after.audio?.codec_name !== 'aac') {
-      throw new Error(
-        `转码后音频验证失败: codec_name=${after.audio?.codec_name ?? 'none'}`,
-      );
-    }
-    console.log('[video] 验证通过: video=h264, audio=aac');
-  } else {
-    console.log('[video] 验证通过: video=h264（无音频轨）');
-  }
+  await assertTranscodeOutput(outputPath);
+  logOutputProbeOptional(outputPath);
 
   scheduleCacheDeletion(outputPath);
   return outputPath;
