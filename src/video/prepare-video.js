@@ -1,4 +1,4 @@
-import { spawn } from 'node:child_process';
+import { execFileSync } from 'node:child_process';
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { config } from '../config.js';
@@ -7,16 +7,6 @@ import { probeMedia, logProbeResult } from './ffprobe-log.js';
 
 const FFMPEG_BIN = process.env.FFMPEG_BIN || 'ffmpeg';
 
-const FFMPEG_ERROR_KEYWORDS = [
-  'Error',
-  'Invalid',
-  'failed',
-  'Conversion',
-  'encoder',
-  'Output',
-  'Stream',
-];
-
 /**
  * @param {{ video: { codec_name?: string } | null, audio: { codec_name?: string } | null }} probe
  */
@@ -24,38 +14,6 @@ function needsTranscode(probe) {
   if (probe.video?.codec_name !== 'h264') return true;
   if (probe.audio && probe.audio.codec_name !== 'aac') return true;
   return false;
-}
-
-/**
- * @param {string} stderr
- * @returns {string}
- */
-export function extractFfmpegErrorHint(stderr) {
-  const lines = stderr.split(/\r?\n/);
-  const hints = [];
-  const seen = new Set();
-
-  for (let i = 0; i < lines.length; i++) {
-    const line = lines[i];
-    const hit = FFMPEG_ERROR_KEYWORDS.some((kw) =>
-      line.toLowerCase().includes(kw.toLowerCase()),
-    );
-    if (!hit) continue;
-
-    for (let j = Math.max(0, i - 1); j <= Math.min(lines.length - 1, i + 1); j++) {
-      const ctx = lines[j].trim();
-      if (!ctx || seen.has(ctx)) continue;
-      seen.add(ctx);
-      hints.push(ctx);
-    }
-  }
-
-  if (hints.length) {
-    return hints.join('\n').slice(0, 1500);
-  }
-
-  const trimmed = stderr.trim();
-  return trimmed.slice(0, 1500) || 'ffmpeg 转码失败';
 }
 
 /**
@@ -88,7 +46,7 @@ export async function prepareVideoForTelegram(inputPath) {
   const outputPath = path.join(config.cacheDir, `${randomUUID()}-h264.mp4`);
   console.log('[video] 开始转码, hasAudio=', hasAudio);
 
-  await transcodeToH264(inputPath, outputPath, hasAudio);
+  transcodeToH264(inputPath, outputPath, hasAudio);
 
   const after = await probeMedia(outputPath);
   logProbeResult(outputPath, 'output', after);
@@ -154,30 +112,16 @@ function transcodeToH264(inputPath, outputPath, hasAudio) {
 
   console.log('[ffmpeg] 命令:', FFMPEG_BIN, args.join(' '));
 
-  return new Promise((resolve, reject) => {
-    const proc = spawn(FFMPEG_BIN, args, { stdio: ['ignore', 'pipe', 'pipe'] });
-    let stderr = '';
-
-    proc.stderr.on('data', (chunk) => {
-      stderr += chunk;
+  try {
+    execFileSync(FFMPEG_BIN, args, {
+      stdio: ['ignore', 'pipe', 'pipe'],
+      maxBuffer: 50 * 1024 * 1024,
     });
+  } catch (err) {
+    const stderr = err.stderr?.toString() || err.message;
+    console.error('FFMPEG_FULL_ERROR:', stderr);
+    throw new Error(stderr.slice(-3500));
+  }
 
-    proc.on('error', (err) => {
-      if (err.code === 'ENOENT') {
-        reject(new Error('未找到 ffmpeg'));
-        return;
-      }
-      reject(err);
-    });
-
-    proc.on('close', (code) => {
-      if (code !== 0) {
-        console.log('[ffmpeg] stderr 完整输出:\n', stderr);
-        reject(new Error(`视频转码失败:\n${extractFfmpegErrorHint(stderr)}`));
-        return;
-      }
-      console.log('[ffmpeg] 转码完成');
-      resolve();
-    });
-  });
+  console.log('[ffmpeg] 转码完成');
 }
