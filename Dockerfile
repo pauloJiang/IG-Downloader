@@ -1,9 +1,8 @@
 FROM node:20
 
-RUN apt-get update \
-  && apt-get install -y ffmpeg python3 python3-pip \
-  && pip3 install --no-cache-dir yt-dlp \
-  && rm -rf /var/lib/apt/lists/*
+RUN apt-get update && \
+    apt-get install -y ffmpeg yt-dlp && \
+    rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
 
