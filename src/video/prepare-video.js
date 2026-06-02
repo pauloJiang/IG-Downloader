@@ -113,23 +113,33 @@ function transcodeToH264(inputPath, outputPath, hasAudio) {
 
   console.log('[ffmpeg] 命令:', FFMPEG_BIN, args.join(' '));
 
-  const result = spawnSync(FFMPEG_BIN, args, { encoding: 'utf8' });
+  const result = spawnSync(FFMPEG_BIN, args, {
+    encoding: 'utf8',
+    maxBuffer: 100 * 1024 * 1024,
+  });
 
-  if (result.error) {
-    if (result.error.code === 'ENOENT') {
-      throw new Error('未找到 ffmpeg');
+  if (result.error?.code === 'ENOENT') {
+    throw new Error('未找到 ffmpeg');
+  }
+
+  const exists = fs.existsSync(outputPath);
+  const size = exists ? fs.statSync(outputPath).size : 0;
+
+  if (!exists) {
+    if (result.status !== 0) {
+      console.error('FFMPEG_FULL_ERROR:', result.stderr);
+      throw new Error((result.stderr || `FFmpeg 退出码 ${result.status}`).slice(-1000));
     }
-    throw result.error;
+    throw new Error('输出文件不存在');
+  }
+
+  if (size === 0) {
+    throw new Error('输出文件为空');
   }
 
   if (result.status !== 0) {
-    console.error('FFMPEG_FULL_ERROR:', result.stderr);
-    throw new Error(`FFmpeg 转码失败：${(result.stderr || '').slice(-1000)}`);
+    console.log('[ffmpeg] 退出码', result.status, '但输出文件有效，视为成功');
   }
 
-  if (!fs.existsSync(outputPath) || fs.statSync(outputPath).size === 0) {
-    throw new Error('FFmpeg 输出文件为空');
-  }
-
-  console.log('[ffmpeg] 转码完成, size=', fs.statSync(outputPath).size);
+  console.log('[ffmpeg] 转码完成, exit=', result.status, 'size=', size);
 }
