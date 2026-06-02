@@ -60,7 +60,7 @@ async function resolveDownloadedFile(id) {
 /**
  * @param {string} filePath
  */
-function scheduleCacheDeletion(filePath) {
+export function scheduleCacheDeletion(filePath) {
   const existing = deletionTimers.get(filePath);
   if (existing) clearTimeout(existing);
 
