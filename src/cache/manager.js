@@ -1,7 +1,11 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
+import { spawn } from 'node:child_process';
 import { config } from '../config.js';
+import { redactUrl } from '../http/fetch-helper.js';
+
+const YTDLP_BIN = process.env.YTDLP_BIN || 'yt-dlp';
 
 /** @type {Map<string, NodeJS.Timeout>} */
 const deletionTimers = new Map();
@@ -21,28 +25,66 @@ async function ensureDir(dir) {
 export async function downloadToCache(mediaUrl, type) {
   await ensureDir(config.cacheDir);
 
-  const ext = type === 'video' ? '.mp4' : '.jpg';
-  const fileName = `${randomUUID()}${ext}`;
-  const filePath = path.join(config.cacheDir, fileName);
+  const id = randomUUID();
+  const outTemplate = path.join(config.cacheDir, `${id}.%(ext)s`);
 
-  const response = await fetch(mediaUrl, {
-    headers: {
-      'User-Agent':
-        'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
-      Referer: 'https://www.instagram.com/',
-    },
-  });
+  console.log('[ytdlp] 下载:', redactUrl(mediaUrl), 'type=', type);
 
-  if (!response.ok) {
-    throw new Error(`媒体下载失败 (${response.status})`);
-  }
+  await runYtdlpDownload(mediaUrl, outTemplate, type);
 
-  const buffer = Buffer.from(await response.arrayBuffer());
-  await fs.writeFile(filePath, buffer);
-
+  const filePath = await resolveDownloadedFile(id);
   scheduleDeletion(filePath);
 
   return { filePath, type };
+}
+
+/**
+ * @param {string} mediaUrl
+ * @param {string} outTemplate
+ * @param {'image' | 'video'} type
+ */
+function runYtdlpDownload(mediaUrl, outTemplate, type) {
+  return new Promise((resolve, reject) => {
+    const args = ['-o', outTemplate, '--no-playlist', '--no-warnings', '--no-progress'];
+
+    if (type === 'video') {
+      args.push('-f', 'bv*+ba/b');
+    }
+
+    args.push(mediaUrl);
+
+    const proc = spawn(YTDLP_BIN, args, { stdio: ['ignore', 'pipe', 'pipe'] });
+    let stderr = '';
+
+    proc.stderr.on('data', (chunk) => {
+      stderr += chunk;
+    });
+
+    proc.on('error', reject);
+
+    proc.on('close', (code) => {
+      if (code !== 0) {
+        reject(new Error(stderr.trim().slice(0, 500) || `yt-dlp 下载失败 (${code})`));
+        return;
+      }
+      resolve();
+    });
+  });
+}
+
+/**
+ * @param {string} id
+ * @returns {Promise<string>}
+ */
+async function resolveDownloadedFile(id) {
+  const files = await fs.readdir(config.cacheDir);
+  const match = files.find((name) => name.startsWith(`${id}.`));
+
+  if (!match) {
+    throw new Error('下载完成但未找到缓存文件');
+  }
+
+  return path.join(config.cacheDir, match);
 }
 
 /**
@@ -57,7 +99,7 @@ function scheduleDeletion(filePath) {
     try {
       await fs.unlink(filePath);
     } catch {
-      // file may already be removed
+      // already removed
     }
   }, config.cacheTtlMs);
 

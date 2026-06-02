@@ -1,13 +1,15 @@
 import { config } from './config.js';
 import { initCacheDir } from './cache/manager.js';
 import { createBot } from './bot.js';
+import { ensureYtdlp } from './instagram/ytdlp.js';
 
 async function main() {
   if (!config.botToken) {
-    console.error('错误：请设置环境变量 BOT_TOKEN');
+    console.error('错误：请通过环境变量 BOT_TOKEN 传入 Token（不要写入本地文件）');
     process.exit(1);
   }
 
+  await ensureYtdlp();
   await initCacheDir();
 
   const bot = createBot();

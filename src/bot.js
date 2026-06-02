@@ -19,7 +19,7 @@ const HELP_TEXT = `📖 *使用帮助*
 /help — 显示此帮助
 
 *说明：*
-• 仅支持公开内容
+• 使用 yt-dlp 解析与下载
 • 轮播帖会逐条发送所有媒体
 • 下载文件缓存 30 分钟后自动删除`;
 
@@ -70,7 +70,7 @@ export function createBot() {
     const statusMsg = await ctx.reply('⏳ 正在解析并下载，请稍候…');
 
     try {
-      const mediaItems = await fetchInstagramMedia(parsed);
+      const mediaItems = await fetchInstagramMedia(parsed.url);
 
       if (!mediaItems.length) {
         await ctx.telegram.editMessageText(
