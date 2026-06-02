@@ -3,6 +3,7 @@ import { config } from './config.js';
 import { parseInstagramUrl, containsInstagramUrl } from './instagram/url.js';
 import { fetchInstagramMedia } from './instagram/fetcher.js';
 import { downloadToCache } from './cache/manager.js';
+import { logVideoProbe } from './video/ffprobe-log.js';
 
 const HELP_TEXT = `📖 *使用帮助*
 
@@ -30,6 +31,7 @@ const HELP_TEXT = `📖 *使用帮助*
  */
 async function sendMediaFile(ctx, file) {
   if (file.type === 'video') {
+    await logVideoProbe(file.filePath);
     await ctx.replyWithVideo(Input.fromLocalFile(file.filePath));
   } else {
     await ctx.replyWithPhoto(Input.fromLocalFile(file.filePath));
