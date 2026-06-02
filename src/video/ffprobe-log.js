@@ -78,6 +78,34 @@ export function logProbeResult(filePath, label, probe) {
 /**
  * @param {string} filePath
  */
+export async function logDownloadStreams(filePath) {
+  try {
+    const { stdout } = await execFileAsync('ffprobe', [
+      '-v',
+      'quiet',
+      '-show_streams',
+      filePath,
+    ]);
+    console.log('[ffprobe] 下载后 -show_streams:', path.basename(filePath));
+    console.log(stdout);
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    console.log('[ffprobe] 下载后探测失败:', path.basename(filePath), message);
+  }
+}
+
+/**
+ * @param {string} filePath
+ * @returns {Promise<boolean>}
+ */
+export async function hasAudioStream(filePath) {
+  const probe = await probeMedia(filePath);
+  return Boolean(probe.audio);
+}
+
+/**
+ * @param {string} filePath
+ */
 export async function logVideoProbe(filePath) {
   try {
     const probe = await probeMedia(filePath);

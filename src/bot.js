@@ -93,7 +93,9 @@ export function createBot() {
       }
 
       for (const item of mediaItems) {
-        const cached = await downloadToCache(item.url, item.type);
+        const cached = await downloadToCache(item.url, item.type, {
+          playlistIndex: item.playlistIndex,
+        });
         await sendMediaFile(ctx, cached);
       }
 

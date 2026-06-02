@@ -4,6 +4,9 @@ import { randomUUID } from 'node:crypto';
 import { config } from '../config.js';
 import { redactUrl } from '../http/fetch-helper.js';
 import { runYtdlp } from '../instagram/ytdlp.js';
+import { logDownloadStreams, hasAudioStream } from '../video/ffprobe-log.js';
+
+export const NO_AUDIO_STREAM_ERROR = '下载结果没有音频流';
 
 /** @type {Map<string, NodeJS.Timeout>} */
 const deletionTimers = new Map();
@@ -16,27 +19,68 @@ async function ensureDir(dir) {
 }
 
 /**
- * @param {string} mediaUrl
+ * @param {string} outTemplate
+ * @param {string} downloadUrl
  * @param {'image' | 'video'} type
+ * @param {{ playlistIndex?: number }} [options]
+ */
+function buildYtdlpDownloadArgs(outTemplate, downloadUrl, type, options = {}) {
+  const args = [
+    '-o',
+    outTemplate,
+    '--no-warnings',
+    '--no-progress',
+  ];
+
+  if (type === 'video') {
+    args.push(
+      '-f',
+      'bv*+ba/b',
+      '--merge-output-format',
+      'mp4',
+    );
+    if (options.playlistIndex) {
+      args.push('--playlist-items', String(options.playlistIndex));
+    } else {
+      args.push('--no-playlist');
+    }
+  } else {
+    args.push('--no-playlist');
+    if (options.playlistIndex) {
+      args.push('--playlist-items', String(options.playlistIndex));
+    }
+  }
+
+  args.push(downloadUrl);
+  return args;
+}
+
+/**
+ * @param {string} downloadUrl
+ * @param {'image' | 'video'} type
+ * @param {{ playlistIndex?: number }} [options]
  * @returns {Promise<{ filePath: string, type: 'image' | 'video' }>}
  */
-export async function downloadToCache(mediaUrl, type) {
+export async function downloadToCache(downloadUrl, type, options = {}) {
   await ensureDir(config.cacheDir);
 
   const id = randomUUID();
   const outTemplate = path.join(config.cacheDir, `${id}.%(ext)s`);
 
-  console.log('[ytdlp] 下载:', redactUrl(mediaUrl), 'type=', type);
+  console.log('[ytdlp] 下载:', redactUrl(downloadUrl), 'type=', type, 'item=', options.playlistIndex ?? 'all');
 
-  const args = ['-o', outTemplate, '--no-playlist', '--no-warnings', '--no-progress'];
-  if (type === 'video') {
-    args.push('-f', 'bv*+ba/b');
-  }
-  args.push(mediaUrl);
+  const args = buildYtdlpDownloadArgs(outTemplate, downloadUrl, type, options);
+  console.log('[ytdlp] 命令:', args.filter((a) => !a.startsWith('http')).join(' '));
 
   await runYtdlp(args);
 
   const filePath = await resolveDownloadedFile(id);
+  await logDownloadStreams(filePath);
+
+  if (type === 'video' && !(await hasAudioStream(filePath))) {
+    throw new Error(NO_AUDIO_STREAM_ERROR);
+  }
+
   scheduleCacheDeletion(filePath);
 
   return { filePath, type };

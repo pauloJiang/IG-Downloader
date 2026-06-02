@@ -11,7 +11,7 @@ export const IG_AUTH_ERROR =
   'Instagram 需要登录或当前IP被限流，请稍后再试或更新 cookies。';
 
 /**
- * @typedef {{ type: 'image' | 'video', url: string }} MediaItem
+ * @typedef {{ type: 'image' | 'video', url: string, playlistIndex?: number }} MediaItem
  */
 
 /**
@@ -90,7 +90,7 @@ export async function fetchInstagramMedia(instagramUrl) {
     throw new Error('yt-dlp JSON 解析失败');
   }
 
-  const items = extractMediaItems(data);
+  const items = extractMediaItems(data, instagramUrl);
   if (!items.length) {
     throw new Error('未找到可下载的媒体');
   }
@@ -101,26 +101,38 @@ export async function fetchInstagramMedia(instagramUrl) {
 
 /**
  * @param {object} data
+ * @param {string} instagramUrl
  * @returns {MediaItem[]}
  */
-function extractMediaItems(data) {
+function extractMediaItems(data, instagramUrl) {
   const entries =
     data._type === 'playlist' && Array.isArray(data.entries)
       ? data.entries.filter(Boolean)
       : [data];
 
+  const isCarousel = entries.length > 1;
+
   /** @type {MediaItem[]} */
   const items = [];
 
-  for (const entry of entries) {
-    const url = pickDirectUrl(entry);
-    if (!url) continue;
+  entries.forEach((entry, index) => {
+    if (isVideoEntry(entry)) {
+      items.push({
+        type: 'video',
+        url: instagramUrl,
+        playlistIndex: isCarousel ? index + 1 : undefined,
+      });
+      return;
+    }
 
-    items.push({
-      type: isVideoEntry(entry) ? 'video' : 'image',
-      url,
-    });
-  }
+    if (pickImageUrl(entry)) {
+      items.push({
+        type: 'image',
+        url: instagramUrl,
+        playlistIndex: isCarousel ? index + 1 : undefined,
+      });
+    }
+  });
 
   return items;
 }
@@ -138,34 +150,19 @@ function isVideoEntry(entry) {
  * @param {object} item
  * @returns {string | null}
  */
-function pickDirectUrl(item) {
-  if (item.url && isDirectMediaUrl(item.url)) {
+function pickImageUrl(item) {
+  if (item.url && isDirectMediaUrl(item.url) && !isVideoEntry(item)) {
     return item.url;
   }
 
   const formats = [...(item.formats || []), ...(item.requested_formats || [])].filter(
-    (f) => f?.url && isDirectMediaUrl(f.url),
+    (f) => f?.url && isDirectMediaUrl(f.url) && (!f.vcodec || f.vcodec === 'none'),
   );
 
   if (!formats.length) return null;
 
-  const videoFormats = formats
-    .filter((f) => f.vcodec && f.vcodec !== 'none')
-    .sort((a, b) => (b.height || 0) - (a.height || 0));
-
-  if (isVideoEntry(item) && videoFormats.length) {
-    return videoFormats[0].url;
-  }
-
-  const imageFormats = formats
-    .filter((f) => !f.vcodec || f.vcodec === 'none')
-    .sort((a, b) => (b.width || 0) - (a.width || 0));
-
-  if (imageFormats.length) {
-    return imageFormats[0].url;
-  }
-
-  return formats[formats.length - 1].url;
+  const imageFormats = formats.sort((a, b) => (b.width || 0) - (a.width || 0));
+  return imageFormats[0].url;
 }
 
 /**
