@@ -8,7 +8,7 @@ import { probeMedia, logProbeResult } from './ffprobe-log.js';
 const FFMPEG_BIN = process.env.FFMPEG_BIN || 'ffmpeg';
 
 /**
- * @param {{ video: import('./ffprobe-log.js').VideoStreamInfo | null, audio: import('./ffprobe-log.js').AudioStreamInfo | null }} probe
+ * @param {{ video: { codec_name?: string } | null, audio: { codec_name?: string } | null }} probe
  */
 function needsTranscode(probe) {
   if (probe.video?.codec_name !== 'h264') return true;
@@ -28,6 +28,14 @@ export async function prepareVideoForTelegram(inputPath) {
     const reason = err instanceof Error ? err.message : String(err);
     throw new Error(`ffprobe 失败: ${reason}`);
   }
+
+  const hasAudio = Boolean(before.audio);
+  console.log('[video] 输入检测:', {
+    file: path.basename(inputPath),
+    codec_name: before.video?.codec_name ?? 'none',
+    hasAudio,
+    audio_codec: before.audio?.codec_name ?? 'none',
+  });
   logProbeResult(inputPath, '发送前', before);
 
   if (!needsTranscode(before)) {
@@ -35,34 +43,29 @@ export async function prepareVideoForTelegram(inputPath) {
     return inputPath;
   }
 
-  console.log(
-    '[video] 需要转码: 视频',
-    before.video?.codec_name ?? 'none',
-    '音频',
-    before.audio?.codec_name ?? 'none',
-  );
-
   const outputPath = path.join(config.cacheDir, `${randomUUID()}-h264.mp4`);
-  await transcodeToH264(inputPath, outputPath);
+  console.log('[video] 开始转码, hasAudio=', hasAudio);
+
+  await transcodeToH264(inputPath, outputPath, hasAudio);
 
   const after = await probeMedia(outputPath);
-  logProbeResult(outputPath, '转码后', after);
+  logProbeResult(outputPath, 'output', after);
 
-  if (after.video?.codec_name !== 'h264' || after.video?.pix_fmt !== 'yuv420p') {
+  if (after.video?.codec_name !== 'h264') {
     throw new Error(
-      `转码后视频验证失败: codec_name=${after.video?.codec_name ?? 'none'}, pix_fmt=${after.video?.pix_fmt ?? 'none'}`,
+      `转码后视频验证失败: codec_name=${after.video?.codec_name ?? 'none'}`,
     );
   }
 
-  if (before.audio) {
+  if (hasAudio) {
     if (after.audio?.codec_name !== 'aac') {
       throw new Error(
         `转码后音频验证失败: codec_name=${after.audio?.codec_name ?? 'none'}`,
       );
     }
-    console.log('[video] 转码验证通过: codec_name=h264, codec_name=aac');
+    console.log('[video] 验证通过: video=h264, audio=aac');
   } else {
-    console.log('[video] 转码验证通过: codec_name=h264（无音频轨）');
+    console.log('[video] 验证通过: video=h264（无音频轨）');
   }
 
   scheduleCacheDeletion(outputPath);
@@ -72,36 +75,20 @@ export async function prepareVideoForTelegram(inputPath) {
 /**
  * @param {string} inputPath
  * @param {string} outputPath
+ * @param {boolean} hasAudio
  */
-function transcodeToH264(inputPath, outputPath) {
-  const args = [
-    '-y',
-    '-i',
-    inputPath,
-    '-c:v',
-    'libx264',
-    '-profile:v',
-    'baseline',
-    '-level',
-    '3.1',
-    '-pix_fmt',
-    'yuv420p',
-    '-c:a',
-    'aac',
-    '-b:a',
-    '128k',
-    '-ar',
-    '44100',
-    '-ac',
-    '2',
-    '-map',
-    '0:v:0',
-    '-map',
-    '0:a?',
-    '-movflags',
-    '+faststart',
-    outputPath,
-  ];
+function transcodeToH264(inputPath, outputPath, hasAudio) {
+  const args = ['-y', '-i', inputPath, '-c:v', 'libx264', '-pix_fmt', 'yuv420p'];
+
+  if (hasAudio) {
+    args.push('-c:a', 'aac', '-shortest');
+  } else {
+    args.push('-an');
+  }
+
+  args.push(outputPath);
+
+  console.log('[ffmpeg] 命令:', FFMPEG_BIN, args.join(' '));
 
   return new Promise((resolve, reject) => {
     const proc = spawn(FFMPEG_BIN, args, { stdio: ['ignore', 'pipe', 'pipe'] });
@@ -121,9 +108,11 @@ function transcodeToH264(inputPath, outputPath) {
 
     proc.on('close', (code) => {
       if (code !== 0) {
+        console.log('[ffmpeg] stderr:', stderr.trim().slice(-800));
         reject(new Error(stderr.trim().slice(-300) || `ffmpeg 退出码 ${code}`));
         return;
       }
+      console.log('[ffmpeg] 转码完成');
       resolve();
     });
   });
