@@ -8,11 +8,13 @@ import {
   probeMedia,
   logProbeResult,
   validateIosMp4,
-  isIosMp4Compatible,
+  canSendWithoutTranscode,
 } from './ffprobe-log.js';
 
 const FFMPEG_BIN = process.env.FFMPEG_BIN || 'ffmpeg';
 const MIN_VIDEO_BYTES = 100_000;
+const SCALE_MAX_WIDTH = Number(process.env.VIDEO_SCALE_MAX_WIDTH) || 1080;
+const VIDEO_SCALE_FILTER = `scale='if(gt(iw,${SCALE_MAX_WIDTH}),${SCALE_MAX_WIDTH},iw)':-2,fps=30,format=yuv420p`;
 
 /**
  * @typedef {{ path: string, sendAs: 'video' | 'document' }} PreparedVideo
@@ -86,6 +88,11 @@ export async function prepareVideoForTelegram(inputPath) {
     file: path.basename(inputPath),
     size: inputSize,
     hasAudio,
+    width: before.video?.width,
+    height: before.video?.height,
+    video_codec: before.video?.codec_name,
+    pix_fmt: before.video?.pix_fmt,
+    audio_codec: before.audio?.codec_name ?? '(none)',
   });
   logProbeResult(inputPath, '输入', before);
 
@@ -93,14 +100,13 @@ export async function prepareVideoForTelegram(inputPath) {
     throw new Error(`原视频文件过小: ${inputSize} bytes`);
   }
 
-  if (isIosMp4Compatible(before, hasAudio)) {
-    console.log('[video] 已符合 iOS MP4 规范，直接发送');
-    await assertIosMp4BeforeSend(inputPath, hasAudio);
+  if (canSendWithoutTranscode(before, hasAudio)) {
+    console.log('[video] h264 + yuv420p + aac/无音频，跳过转码直接发送');
     return { path: inputPath, sendAs: 'video' };
   }
 
   const outputPath = path.join(config.cacheDir, `${randomUUID()}-ios.mp4`);
-  console.log('[video] 开始转码为 iOS 兼容 MP4, hasAudio=', hasAudio);
+  console.log('[video] 需要转码为 iOS 兼容 MP4, hasAudio=', hasAudio);
 
   try {
     transcodeToIosMp4(inputPath, outputPath, hasAudio);
@@ -131,7 +137,7 @@ function buildFfmpegArgs(inputPath, outputPath, hasAudio) {
     '-i',
     inputPath,
     '-vf',
-    'scale=720:-2,fps=30,format=yuv420p',
+    VIDEO_SCALE_FILTER,
     '-c:v',
     'libx264',
     '-profile:v',

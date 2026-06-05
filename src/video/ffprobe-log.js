@@ -131,6 +131,21 @@ export function isIosMp4Compatible(probe, requireAudio) {
 }
 
 /**
+ * 满足 h264 + yuv420p + aac（或无音频）时跳过转码直发。
+ * @param {MediaProbe} probe
+ * @param {boolean} hasAudio
+ */
+export function canSendWithoutTranscode(probe, hasAudio) {
+  if (!probe.video) return false;
+  if (probe.video.codec_name !== 'h264') return false;
+  if (probe.video.pix_fmt !== 'yuv420p') return false;
+  if (hasAudio) {
+    if (!probe.audio || probe.audio.codec_name !== 'aac') return false;
+  }
+  return true;
+}
+
+/**
  * @param {string} filePath
  * @param {string} label
  * @param {MediaProbe} probe
@@ -143,6 +158,8 @@ export function logProbeResult(filePath, label, probe) {
     format: probe.format_name,
     video_codec: probe.video?.codec_name,
     video_profile: probe.video?.profile,
+    width: probe.video?.width,
+    height: probe.video?.height,
     pix_fmt: probe.video?.pix_fmt,
     audio_codec: probe.audio?.codec_name ?? '(none)',
   });
