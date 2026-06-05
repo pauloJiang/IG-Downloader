@@ -9,7 +9,8 @@ import { setNotifyBot, notifyAdminCookieFailure } from './admin/notify.js';
 import { getUserFacingIgError } from './admin/cookie-errors.js';
 import { markProcessed } from './admin/stats.js';
 import { parseSupportedLink, containsSupportedLink } from './platforms/link.js';
-import { downloadXVideo, X_DOWNLOAD_ERROR } from './x/download.js';
+import { downloadXVideo } from './x/download.js';
+import { X_USER_ERROR_MESSAGE } from './x/errors.js';
 
 const HELP_TEXT = `📖 *使用帮助*
 
@@ -70,10 +71,9 @@ async function handleIgDownloadError(ctx, statusMsg, rawMessage) {
  * @param {import('telegraf').Types.Message.TextMessage} statusMsg
  */
 async function handleXDownloadError(ctx, statusMsg) {
-  const message = `❌ ${X_DOWNLOAD_ERROR}`;
   await ctx.telegram
-    .editMessageText(ctx.chat.id, statusMsg.message_id, undefined, message)
-    .catch(() => ctx.reply(message));
+    .editMessageText(ctx.chat.id, statusMsg.message_id, undefined, X_USER_ERROR_MESSAGE)
+    .catch(() => ctx.reply(X_USER_ERROR_MESSAGE));
 }
 
 /**

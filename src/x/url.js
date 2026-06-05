@@ -1,5 +1,7 @@
-const X_HOST = /(?:https?:\/\/)?(?:www\.)?(?:x\.com|twitter\.com)/i;
-const STATUS_PATTERN = /(?:x\.com|twitter\.com)\/[^/\s]+\/status\/(\d+)/i;
+const X_HOST =
+  /(?:https?:\/\/)?(?:(?:www\.)?x\.com|(?:www\.|mobile\.)?twitter\.com)/i;
+const STATUS_PATTERN =
+  /(?:(?:www\.)?x\.com|(?:www\.|mobile\.)?twitter\.com)\/[^/\s]+\/status\/(\d+)/i;
 
 /**
  * @param {string} text

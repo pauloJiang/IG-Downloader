@@ -12,6 +12,20 @@ export const IG_AUTH_ERROR =
 
 /** @typedef {'instagram' | 'x'} YtdlpPlatform */
 
+export class YtdlpRunError extends Error {
+  /**
+   * @param {string} message
+   * @param {{ stderr?: string, stdout?: string, code?: number | null }} [details]
+   */
+  constructor(message, details = {}) {
+    super(message);
+    this.name = 'YtdlpRunError';
+    this.stderr = details.stderr ?? '';
+    this.stdout = details.stdout ?? '';
+    this.code = details.code ?? null;
+  }
+}
+
 /**
  * @typedef {{ type: 'image' | 'video', url: string, playlistIndex?: number }} MediaItem
  */
@@ -34,7 +48,7 @@ export async function ensureYtdlp() {
  */
 export function mapYtdlpError(message, platform = 'instagram') {
   if (platform === 'x') {
-    return new Error('X 视频下载失败，可能是私密内容、登录限制或链接无效。');
+    return new Error('X 视频下载失败');
   }
 
   const lower = message.toLowerCase();
@@ -53,12 +67,13 @@ export function mapYtdlpError(message, platform = 'instagram') {
 
 /**
  * @param {string[]} args
- * @param {{ platform?: YtdlpPlatform }} [options]
+ * @param {{ platform?: YtdlpPlatform, useCookies?: boolean }} [options]
  * @returns {Promise<{ stdout: string, stderr: string }>}
  */
 export async function runYtdlp(args, options = {}) {
   const platform = options.platform ?? 'instagram';
-  const fullArgs = [...getYtdlpCookieArgs(), ...args];
+  const useCookies = options.useCookies ?? platform !== 'x';
+  const fullArgs = [...(useCookies ? getYtdlpCookieArgs() : []), ...args];
 
   return new Promise((resolve, reject) => {
     const proc = spawn(YTDLP_BIN, fullArgs, { stdio: ['ignore', 'pipe', 'pipe'] });
@@ -77,6 +92,19 @@ export async function runYtdlp(args, options = {}) {
     proc.on('close', (code) => {
       if (code !== 0) {
         const msg = stderr.trim() || stdout.trim() || `yt-dlp 退出码 ${code}`;
+
+        if (platform === 'x') {
+          console.error('[x] yt-dlp stderr (last 1200 chars):\n', stderr.slice(-1200));
+          reject(
+            new YtdlpRunError(mapYtdlpError(msg, platform).message, {
+              stderr,
+              stdout,
+              code,
+            }),
+          );
+          return;
+        }
+
         reject(mapYtdlpError(msg.slice(0, 500), platform));
         return;
       }

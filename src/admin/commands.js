@@ -4,6 +4,7 @@ import { isAdmin } from './auth.js';
 import { addUser, removeUser, listUsers } from './whitelist.js';
 import { saveCookieFile, isValidCookieContent } from './cookie-file.js';
 import { getBotStatus, clearCacheFiles } from './stats.js';
+import { debugXUrl } from '../x/debug.js';
 
 /** @type {Set<number>} */
 export const awaitingCookieUpload = new Set();
@@ -93,6 +94,23 @@ export function registerAdminCommands(bot) {
     );
   });
 
+  bot.command('debugx', async (ctx) => {
+    if (!isAdmin(ctx.from?.id)) {
+      await ctx.reply('❌ 仅管理员可用');
+      return;
+    }
+
+    const url = parseUrlFromCommand(ctx.message.text);
+    if (!url) {
+      await ctx.reply('用法：/debugx https://x.com/xxx/status/123');
+      return;
+    }
+
+    await ctx.reply('⏳ 正在执行 debugx…');
+    const result = await debugXUrl(url);
+    await ctx.reply(result.summary.slice(0, 4000));
+  });
+
   bot.command('clearcache', async (ctx) => {
     if (!isAdmin(ctx.from?.id)) {
       await ctx.reply('❌ 仅管理员可用');
@@ -146,4 +164,13 @@ function parseUserIdFromCommand(text) {
   const parts = text.trim().split(/\s+/);
   const id = Number(parts[1]);
   return Number.isFinite(id) ? id : null;
+}
+
+/**
+ * @param {string | undefined} text
+ */
+function parseUrlFromCommand(text) {
+  if (!text) return null;
+  const match = text.match(/https?:\/\/[^\s]+/i);
+  return match ? match[0].replace(/[)>]+$/g, '') : null;
 }
