@@ -2,6 +2,8 @@ import { execFile, spawn } from 'node:child_process';
 import { promisify } from 'node:util';
 import { redactUrl } from '../http/fetch-helper.js';
 import { getYtdlpCookieArgs } from './cookies.js';
+import { getXCookieArgs } from '../x/cookies.js';
+import { isXAuthError } from '../x/errors.js';
 
 const execFileAsync = promisify(execFile);
 
@@ -51,6 +53,9 @@ export async function ensureYtdlp() {
  */
 export function mapYtdlpError(message, platform = 'instagram') {
   if (platform === 'x') {
+    if (isXAuthError(message)) {
+      return new Error('X 需要登录验证');
+    }
     return new Error('X 视频下载失败');
   }
 
@@ -73,10 +78,20 @@ export function mapYtdlpError(message, platform = 'instagram') {
  * @param {{ platform?: YtdlpPlatform, useCookies?: boolean }} [options]
  * @returns {Promise<{ stdout: string, stderr: string }>}
  */
+/**
+ * @param {YtdlpPlatform} platform
+ * @param {boolean} useCookies
+ */
+function resolveCookieArgs(platform, useCookies) {
+  if (!useCookies) return [];
+  if (platform === 'x') return getXCookieArgs();
+  return getYtdlpCookieArgs();
+}
+
 export async function runYtdlp(args, options = {}) {
   const platform = options.platform ?? 'instagram';
-  const useCookies = options.useCookies ?? platform !== 'x';
-  const fullArgs = [...(useCookies ? getYtdlpCookieArgs() : []), ...args];
+  const useCookies = options.useCookies ?? true;
+  const fullArgs = [...resolveCookieArgs(platform, useCookies), ...args];
 
   return new Promise((resolve, reject) => {
     const proc = spawn(YTDLP_BIN, fullArgs, { stdio: ['ignore', 'pipe', 'pipe'] });

@@ -3,6 +3,7 @@ import { initCacheDir } from './cache/manager.js';
 import { createBot } from './bot.js';
 import { ensureYtdlp } from './instagram/ytdlp.js';
 import { initIgCookies } from './instagram/cookies.js';
+import { initXCookies, logXCookiesStartup } from './x/cookies.js';
 import { initWhitelist } from './admin/whitelist.js';
 
 async function main() {
@@ -17,6 +18,8 @@ async function main() {
 
   await ensureYtdlp();
   await initIgCookies();
+  await initXCookies();
+  logXCookiesStartup();
   await initWhitelist();
   await initCacheDir();
 

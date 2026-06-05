@@ -9,6 +9,7 @@ export const config = {
   adminTgId: process.env.ADMIN_TG_ID ? Number(process.env.ADMIN_TG_ID) : null,
   dataDir: DATA_DIR,
   cookiesPath: process.env.COOKIES_PATH || '/data/cookies.txt',
+  xCookiesPath: process.env.X_COOKIES_PATH || '/data/x_cookies.txt',
   whitelistPath: path.join(DATA_DIR, 'whitelist.json'),
   cacheDir: CACHE_DIR,
   cacheTtlMs: CACHE_TTL_MS,

@@ -6,6 +6,7 @@ import { redactUrl } from '../http/fetch-helper.js';
 import { runYtdlp } from '../instagram/ytdlp.js';
 import { scheduleCacheDeletion } from '../cache/manager.js';
 import { logDownloadStreams, hasAudioStream } from '../video/ffprobe-log.js';
+import { xCookieExists } from './cookies.js';
 
 const MIN_VIDEO_BYTES = 100_000;
 
@@ -21,13 +22,34 @@ function logFileState(label, filePath) {
 }
 
 /**
+ * @param {boolean} usingCookies
+ * @param {string} outTemplate
+ * @param {string} url
+ */
+function buildXDownloadArgs(usingCookies, outTemplate, url) {
+  const format = usingCookies ? 'bestvideo+bestaudio/best' : 'bv*+ba/best';
+  return [
+    '--no-playlist',
+    '-f',
+    format,
+    '--merge-output-format',
+    'mp4',
+    '-o',
+    outTemplate,
+    '--no-warnings',
+    '--no-progress',
+    url,
+  ];
+}
+
+/**
  * @param {string} url
  * @returns {Promise<string>}
  */
 async function fetchXVideoId(url) {
   const { stdout } = await runYtdlp(
     ['--print', 'id', '--no-playlist', '--no-warnings', '-s', url],
-    { platform: 'x', useCookies: false },
+    { platform: 'x', useCookies: true },
   );
   const id = stdout.trim();
   if (!id) {
@@ -70,20 +92,11 @@ async function resolveXFileById(videoId) {
 export async function downloadXVideo(url) {
   await fsPromises.mkdir(config.cacheDir, { recursive: true });
 
-  const outTemplate = path.join(config.cacheDir, '%(id)s.%(ext)s');
+  const usingCookies = xCookieExists();
+  console.log(`Using X Cookies: ${usingCookies}`);
 
-  const args = [
-    '--no-playlist',
-    '-f',
-    'bv*+ba/best',
-    '--merge-output-format',
-    'mp4',
-    '-o',
-    outTemplate,
-    '--no-warnings',
-    '--no-progress',
-    url,
-  ];
+  const outTemplate = path.join(config.cacheDir, '%(id)s.%(ext)s');
+  const args = buildXDownloadArgs(usingCookies, outTemplate, url);
 
   console.log('[x] 下载视频:', redactUrl(url));
   console.log('[x] yt-dlp 命令:', args.filter((a) => !a.startsWith('http')).join(' '));
@@ -93,7 +106,7 @@ export async function downloadXVideo(url) {
   /** @type {Error | null} */
   let ytdlpError = null;
   try {
-    await runYtdlp(args, { platform: 'x', useCookies: false });
+    await runYtdlp(args, { platform: 'x', useCookies: true });
   } catch (err) {
     ytdlpError = err instanceof Error ? err : new Error(String(err));
     console.warn('[x] yt-dlp 下载报错，尝试使用已落盘文件:', ytdlpError.message);

@@ -11,7 +11,8 @@ import { getUserFacingIgError } from './admin/cookie-errors.js';
 import { markProcessed } from './admin/stats.js';
 import { parseSupportedLink, containsSupportedLink } from './platforms/link.js';
 import { downloadXVideo } from './x/download.js';
-import { X_USER_ERROR_MESSAGE } from './x/errors.js';
+import { X_USER_ERROR_MESSAGE, X_AUTH_ERROR_MESSAGE, isXAuthError } from './x/errors.js';
+import { YtdlpRunError } from './instagram/ytdlp.js';
 
 const HELP_TEXT = `📖 *使用帮助*
 
@@ -87,10 +88,16 @@ async function handleIgDownloadError(ctx, statusMsg, rawMessage) {
  * @param {import('telegraf').Context} ctx
  * @param {import('telegraf').Types.Message.TextMessage} statusMsg
  */
-async function handleXDownloadError(ctx, statusMsg) {
+async function handleXDownloadError(ctx, statusMsg, err) {
+  const stderr = err instanceof YtdlpRunError ? err.stderr : '';
+  const message = err instanceof Error ? err.message : String(err);
+  const text = isXAuthError(`${stderr}\n${message}`)
+    ? X_AUTH_ERROR_MESSAGE
+    : X_USER_ERROR_MESSAGE;
+
   await ctx.telegram
-    .editMessageText(ctx.chat.id, statusMsg.message_id, undefined, X_USER_ERROR_MESSAGE)
-    .catch(() => ctx.reply(X_USER_ERROR_MESSAGE));
+    .editMessageText(ctx.chat.id, statusMsg.message_id, undefined, text)
+    .catch(() => ctx.reply(text));
 }
 
 /**
@@ -198,7 +205,7 @@ export function createBot() {
       await handleXDownload(ctx, statusMsg, link);
     } catch (err) {
       if (link.platform === 'x') {
-        await handleXDownloadError(ctx, statusMsg);
+        await handleXDownloadError(ctx, statusMsg, err);
         return;
       }
 

@@ -27,7 +27,7 @@ export async function debugXUrl(text) {
   try {
     const { stderr } = await runYtdlp(['-v', '--no-playlist', parsed.url], {
       platform: 'x',
-      useCookies: false,
+      useCookies: true,
     });
 
     return {
