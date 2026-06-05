@@ -131,7 +131,15 @@ export function isIosMp4Compatible(probe, requireAudio) {
 }
 
 /**
- * 满足 h264 + yuv420p + aac（或无音频）时跳过转码直发。
+ * @param {string | undefined} profile
+ */
+function isHigh10Profile(profile) {
+  if (!profile) return false;
+  return profile.toLowerCase().includes('high 10');
+}
+
+/**
+ * 满足 h264 + yuv420p + aac（或无音频）时跳过转码直发（X 分支）。
  * @param {MediaProbe} probe
  * @param {boolean} hasAudio
  */
@@ -143,6 +151,39 @@ export function canSendWithoutTranscode(probe, hasAudio) {
     if (!probe.audio || probe.audio.codec_name !== 'aac') return false;
   }
   return true;
+}
+
+/**
+ * IG 智能跳过转码：h264/yuv420p/aac、非 High 10、mp4 容器。
+ * @param {MediaProbe} probe
+ * @param {boolean} hasAudio
+ */
+export function canIgSkipTranscode(probe, hasAudio) {
+  if (!probe.video) return false;
+  if (probe.video.codec_name !== 'h264') return false;
+  if (probe.video.pix_fmt !== 'yuv420p') return false;
+  if (isHigh10Profile(probe.video.profile)) return false;
+  if (hasAudio) {
+    if (!probe.audio || probe.audio.codec_name !== 'aac') return false;
+  }
+  if (!isMp4Container(probe.format_name)) return false;
+  return true;
+}
+
+const IG_INCOMPATIBLE_CODEC_LABELS = {
+  vp9: 'VP9',
+  hevc: 'HEVC',
+  av1: 'AV1',
+};
+
+/**
+ * @param {MediaProbe} probe
+ * @returns {string | null}
+ */
+export function getIgIncompatibleCodecLabel(probe) {
+  const codec = probe.video?.codec_name?.toLowerCase();
+  if (!codec) return null;
+  return IG_INCOMPATIBLE_CODEC_LABELS[codec] ?? null;
 }
 
 /**

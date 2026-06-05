@@ -1,3 +1,4 @@
+import fs from 'node:fs';
 import { Telegraf, Input } from 'telegraf';
 import { config } from './config.js';
 import { fetchInstagramMedia } from './instagram/fetcher.js';
@@ -41,10 +42,23 @@ const HELP_TEXT = `📖 *使用帮助*
  * @param {{ platform?: 'instagram' | 'x' }} [options]
  */
 async function sendMediaFile(ctx, file, options = {}) {
+  const platform = options.platform ?? 'instagram';
+
   if (file.type === 'video') {
-    const prepared = await prepareVideoForTelegram(file.filePath, {
-      platform: options.platform ?? 'instagram',
-    });
+    const prepared = await prepareVideoForTelegram(file.filePath, { platform });
+
+    if (platform === 'x') {
+      console.log('[x] sendingPath:', prepared.path);
+      const fileExists = fs.existsSync(prepared.path);
+      const fileSize = fileExists ? fs.statSync(prepared.path).size : 0;
+      await ctx.replyWithVideo(Input.fromLocalFile(prepared.path));
+      console.log('[x] 已发送视频:', {
+        path: prepared.path,
+        fileExists,
+        fileSize,
+      });
+      return;
+    }
 
     if (prepared.sendAs === 'document') {
       await ctx.replyWithDocument(Input.fromLocalFile(prepared.path));

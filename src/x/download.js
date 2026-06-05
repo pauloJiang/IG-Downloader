@@ -1,19 +1,48 @@
-import fs from 'node:fs/promises';
+import fs from 'node:fs';
+import fsPromises from 'node:fs/promises';
 import path from 'node:path';
-import { randomUUID } from 'node:crypto';
 import { config } from '../config.js';
 import { redactUrl } from '../http/fetch-helper.js';
 import { runYtdlp } from '../instagram/ytdlp.js';
 import { scheduleCacheDeletion } from '../cache/manager.js';
 import { logDownloadStreams, hasAudioStream } from '../video/ffprobe-log.js';
 
+const MIN_VIDEO_BYTES = 100_000;
+
 /**
- * @param {string} id
+ * @param {string} label
+ * @param {string} filePath
+ */
+function logFileState(label, filePath) {
+  const fileExists = fs.existsSync(filePath);
+  const fileSize = fileExists ? fs.statSync(filePath).size : 0;
+  console.log(`[x] ${label}:`, { outputPath: filePath, fileExists, fileSize });
+  return { fileExists, fileSize };
+}
+
+/**
+ * @param {string} url
  * @returns {Promise<string>}
  */
-async function resolveXLargestFile(id) {
-  const files = await fs.readdir(config.cacheDir);
-  const matches = files.filter((name) => name.startsWith(`${id}.`));
+async function fetchXVideoId(url) {
+  const { stdout } = await runYtdlp(
+    ['--print', 'id', '--no-playlist', '--no-warnings', '-s', url],
+    { platform: 'x', useCookies: false },
+  );
+  const id = stdout.trim();
+  if (!id) {
+    throw new Error('无法解析 X 视频 ID');
+  }
+  return id;
+}
+
+/**
+ * @param {string} videoId
+ * @returns {Promise<string>}
+ */
+async function resolveXFileById(videoId) {
+  const files = await fsPromises.readdir(config.cacheDir);
+  const matches = files.filter((name) => name.startsWith(`${videoId}.`));
 
   if (!matches.length) {
     throw new Error('下载完成但未找到缓存文件');
@@ -24,14 +53,13 @@ async function resolveXLargestFile(id) {
 
   for (const name of matches) {
     const filePath = path.join(config.cacheDir, name);
-    const stat = await fs.stat(filePath);
+    const stat = await fsPromises.stat(filePath);
     if (stat.size > largestSize) {
       largestSize = stat.size;
       largest = name;
     }
   }
 
-  console.log('[x] 选用最大文件:', largest, 'size=', largestSize);
   return path.join(config.cacheDir, largest);
 }
 
@@ -40,10 +68,9 @@ async function resolveXLargestFile(id) {
  * @returns {Promise<{ filePath: string, type: 'video' }>}
  */
 export async function downloadXVideo(url) {
-  await fs.mkdir(config.cacheDir, { recursive: true });
+  await fsPromises.mkdir(config.cacheDir, { recursive: true });
 
-  const id = randomUUID();
-  const outTemplate = path.join(config.cacheDir, `${id}.%(ext)s`);
+  const outTemplate = path.join(config.cacheDir, '%(id)s.%(ext)s');
 
   const args = [
     '--no-playlist',
@@ -61,15 +88,38 @@ export async function downloadXVideo(url) {
   console.log('[x] 下载视频:', redactUrl(url));
   console.log('[x] yt-dlp 命令:', args.filter((a) => !a.startsWith('http')).join(' '));
 
-  await runYtdlp(args, { platform: 'x', useCookies: false });
+  const videoId = await fetchXVideoId(url);
 
-  const filePath = await resolveXLargestFile(id);
-  await logDownloadStreams(filePath);
-
-  if (!(await hasAudioStream(filePath))) {
-    console.log('🎬 视频无音频轨，已按静音视频处理');
+  /** @type {Error | null} */
+  let ytdlpError = null;
+  try {
+    await runYtdlp(args, { platform: 'x', useCookies: false });
+  } catch (err) {
+    ytdlpError = err instanceof Error ? err : new Error(String(err));
+    console.warn('[x] yt-dlp 下载报错，尝试使用已落盘文件:', ytdlpError.message);
   }
 
-  scheduleCacheDeletion(filePath);
-  return { filePath, type: 'video' };
+  const filePath = await resolveXFileById(videoId);
+  const { fileExists, fileSize } = logFileState('下载完成', filePath);
+
+  if (fileExists && fileSize > MIN_VIDEO_BYTES) {
+    if (ytdlpError) {
+      console.warn('[x] yt-dlp 报错但文件有效 (>100KB)，继续处理');
+    }
+
+    await logDownloadStreams(filePath);
+
+    if (!(await hasAudioStream(filePath))) {
+      console.log('🎬 视频无音频轨，已按静音视频处理');
+    }
+
+    scheduleCacheDeletion(filePath);
+    return { filePath, type: 'video' };
+  }
+
+  if (ytdlpError) {
+    throw ytdlpError;
+  }
+
+  throw new Error(`下载文件无效: size=${fileSize} bytes`);
 }

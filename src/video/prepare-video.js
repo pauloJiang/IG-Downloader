@@ -9,6 +9,8 @@ import {
   logProbeResult,
   validateIosMp4,
   canSendWithoutTranscode,
+  canIgSkipTranscode,
+  getIgIncompatibleCodecLabel,
 } from './ffprobe-log.js';
 
 const FFMPEG_BIN = process.env.FFMPEG_BIN || 'ffmpeg';
@@ -16,12 +18,12 @@ const MIN_VIDEO_BYTES = 100_000;
 const IG_VIDEO_SCALE_FILTER = "scale='min(720,iw)':-2,fps=30,format=yuv420p";
 const X_VIDEO_SCALE_FILTER =
   "scale='if(gt(iw,1080),1080,iw)':-2,fps=30,format=yuv420p";
-const IG_ENCODE = { profile: 'baseline', level: '3.1' };
-const X_ENCODE = { profile: 'main', level: '4.0' };
+const IG_ENCODE = { profile: 'baseline', level: '3.1', preset: 'ultrafast', crf: '24' };
+const X_ENCODE = { profile: 'main', level: '4.0', preset: 'veryfast', crf: '23' };
 const ASPECT_RATIO_MAX_DRIFT = 0.01;
 
 /** @typedef {'instagram' | 'x'} VideoPlatform */
-/** @typedef {{ profile: string, level: string }} EncodeOptions */
+/** @typedef {{ profile: string, level: string, preset: string, crf: string }} EncodeOptions */
 
 /**
  * @typedef {{ path: string, sendAs: 'video' | 'document' }} PreparedVideo
@@ -179,9 +181,16 @@ export async function prepareVideoForTelegram(inputPath, options = {}) {
     throw new Error(`原视频文件过小: ${inputSize} bytes`);
   }
 
-  if (canSendWithoutTranscode(before, hasAudio)) {
-    console.log('🚀 兼容视频，直接发送');
-    if (platform === 'x') {
+  const shouldSkipTranscode =
+    platform === 'instagram'
+      ? canIgSkipTranscode(before, hasAudio)
+      : canSendWithoutTranscode(before, hasAudio);
+
+  if (shouldSkipTranscode) {
+    if (platform === 'instagram') {
+      console.log('🚀 原视频已兼容，跳过转码');
+    } else {
+      console.log('🚀 兼容视频，直接发送');
       console.log('[x] 直发尺寸:', {
         width: before.video?.width,
         height: before.video?.height,
@@ -190,7 +199,16 @@ export async function prepareVideoForTelegram(inputPath, options = {}) {
     return { path: inputPath, sendAs: 'video' };
   }
 
-  console.log('🔄 检测到不兼容编码，开始转码');
+  if (platform === 'instagram') {
+    const codecLabel = getIgIncompatibleCodecLabel(before);
+    if (codecLabel) {
+      console.log(`🔄 检测到 ${codecLabel}，开始转码`);
+    } else {
+      console.log('🔄 检测到不兼容编码，开始转码');
+    }
+  } else {
+    console.log('🔄 检测到不兼容编码，开始转码');
+  }
   const scaleFilter = platform === 'instagram' ? IG_VIDEO_SCALE_FILTER : X_VIDEO_SCALE_FILTER;
   const encode = platform === 'instagram' ? IG_ENCODE : X_ENCODE;
   const outputPath = path.join(config.cacheDir, `${randomUUID()}-ios.mp4`);
@@ -219,12 +237,18 @@ export async function prepareVideoForTelegram(inputPath, options = {}) {
       throw new Error(`IG 视频转码失败: ${reason}`);
     }
 
+    const inputExists = fs.existsSync(inputPath);
+    const inputSize = getFileSize(inputPath);
+    if (inputExists && inputSize > MIN_VIDEO_BYTES) {
+      console.warn('[x] 转码/验证失败，使用原文件 replyWithVideo:', reason);
+      return { path: inputPath, sendAs: 'video' };
+    }
+
     if (reason.includes('比例异常')) {
       throw new Error(reason);
     }
 
-    console.warn('[video] 转码/验证失败，改用原视频 document 发送:', reason);
-    return { path: inputPath, sendAs: 'document' };
+    throw new Error(`X 视频处理失败: ${reason}`);
   }
 }
 
@@ -247,9 +271,9 @@ function buildFfmpegArgs(inputPath, outputPath, hasAudio, scaleFilter, encode) {
     '-level',
     encode.level,
     '-preset',
-    'veryfast',
+    encode.preset,
     '-crf',
-    '23',
+    encode.crf,
   ];
 
   if (hasAudio) {
