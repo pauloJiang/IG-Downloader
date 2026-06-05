@@ -148,7 +148,6 @@ async function assertXVideoBeforeSend(inputProbe, outputPath, requireAudio) {
  */
 export async function prepareVideoForTelegram(inputPath, options = {}) {
   const platform = options.platform ?? 'instagram';
-  const forceTranscode = platform === 'instagram';
   let before;
   try {
     before = await probeMedia(inputPath);
@@ -180,8 +179,8 @@ export async function prepareVideoForTelegram(inputPath, options = {}) {
     throw new Error(`原视频文件过小: ${inputSize} bytes`);
   }
 
-  if (!forceTranscode && canSendWithoutTranscode(before, hasAudio)) {
-    console.log('[video] h264 + yuv420p + aac/无音频，跳过转码直接发送');
+  if (canSendWithoutTranscode(before, hasAudio)) {
+    console.log('🚀 兼容视频，直接发送');
     if (platform === 'x') {
       console.log('[x] 直发尺寸:', {
         width: before.video?.width,
@@ -191,13 +190,11 @@ export async function prepareVideoForTelegram(inputPath, options = {}) {
     return { path: inputPath, sendAs: 'video' };
   }
 
-  const scaleFilter = forceTranscode ? IG_VIDEO_SCALE_FILTER : X_VIDEO_SCALE_FILTER;
-  const encode = forceTranscode ? IG_ENCODE : X_ENCODE;
+  console.log('🔄 检测到不兼容编码，开始转码');
+  const scaleFilter = platform === 'instagram' ? IG_VIDEO_SCALE_FILTER : X_VIDEO_SCALE_FILTER;
+  const encode = platform === 'instagram' ? IG_ENCODE : X_ENCODE;
   const outputPath = path.join(config.cacheDir, `${randomUUID()}-ios.mp4`);
-  console.log(
-    `[video] ${forceTranscode ? 'IG 统一转码' : 'X 转码'}为兼容 MP4, hasAudio=`,
-    hasAudio,
-  );
+  console.log(`[video] ${platform === 'instagram' ? 'IG' : 'X'} 转码, hasAudio=`, hasAudio);
 
   try {
     transcodeToIosMp4(inputPath, outputPath, hasAudio, scaleFilter, encode);
@@ -218,7 +215,7 @@ export async function prepareVideoForTelegram(inputPath, options = {}) {
 
     const reason = err instanceof Error ? err.message : String(err);
 
-    if (forceTranscode) {
+    if (platform === 'instagram') {
       throw new Error(`IG 视频转码失败: ${reason}`);
     }
 
