@@ -6,6 +6,7 @@ import { prepareVideoForTelegram } from '../video/prepare-video.js';
 import { notifyAdminCookieFailure } from '../admin/notify.js';
 import { getUserFacingIgError } from '../admin/cookie-errors.js';
 import { markProcessed } from '../admin/stats.js';
+import { createIgPerfTotals, logIgPerfSummary } from './perf.js';
 
 /**
  * @param {import('telegraf').Context} ctx
@@ -23,18 +24,22 @@ async function replyIgError(ctx, statusMsg, rawMessage) {
 /**
  * @param {import('telegraf').Context} ctx
  * @param {{ filePath: string, type: 'image' | 'video' }} file
- * @returns {Promise<{ ffmpegMs: number, telegramMs: number }>}
+ * @param {ReturnType<typeof createIgPerfTotals>} perf
  */
-async function sendIgMedia(ctx, file) {
-  let ffmpegMs = 0;
-  let telegramMs = 0;
-
+async function sendIgMedia(ctx, file, perf) {
   console.log('[IG] process');
 
   if (file.type === 'video') {
-    const ffmpegStart = Date.now();
-    const prepared = await prepareVideoForTelegram(file.filePath, { platform: 'instagram' });
-    ffmpegMs = Date.now() - ffmpegStart;
+    const prepared = await prepareVideoForTelegram(file.filePath, {
+      platform: 'instagram',
+      collectPerf: true,
+    });
+
+    if (prepared.perf) {
+      perf.probeInputMs += prepared.perf.probeInputMs;
+      perf.ffmpegMs += prepared.perf.ffmpegMs;
+      perf.probeOutputMs += prepared.perf.probeOutputMs;
+    }
 
     console.log('[IG] send');
     const telegramStart = Date.now();
@@ -43,36 +48,39 @@ async function sendIgMedia(ctx, file) {
     } else {
       await ctx.replyWithVideo(Input.fromLocalFile(prepared.path));
     }
-    telegramMs = Date.now() - telegramStart;
-    return { ffmpegMs, telegramMs };
+    perf.telegramMs += Date.now() - telegramStart;
+    return;
   }
 
   console.log('[IG] send');
   const telegramStart = Date.now();
   await ctx.replyWithPhoto(Input.fromLocalFile(file.filePath));
-  telegramMs = Date.now() - telegramStart;
-  return { ffmpegMs, telegramMs };
+  perf.telegramMs += Date.now() - telegramStart;
 }
 
 /**
  * @param {import('telegraf').Context} ctx
- * @param {import('telegraf').Types.Message.TextMessage} statusMsg
  * @param {string} text
  */
-export async function handleInstagram(ctx, statusMsg, text) {
+export async function handleInstagram(ctx, text) {
   const totalStart = Date.now();
-  console.log('[IG] start');
+  const perf = createIgPerfTotals();
+  console.log('[IG PERF] start');
 
+  const detectStart = Date.now();
   const parsed = parseInstagramUrl(text);
+  perf.detectMs = Date.now() - detectStart;
+
   if (!parsed) {
-    await ctx.telegram.editMessageText(
-      ctx.chat.id,
-      statusMsg.message_id,
-      undefined,
-      '❌ 无法识别 Instagram 链接，请检查后重试。',
-    );
+    const statusMsg = await ctx.reply('❌ 无法识别 Instagram 链接，请检查后重试。');
+    perf.replyMs = 0;
+    logIgPerfSummary(perf, Date.now() - totalStart);
     return;
   }
+
+  const replyStart = Date.now();
+  const statusMsg = await ctx.reply('🔍 正在解析下载...');
+  perf.replyMs = Date.now() - replyStart;
 
   try {
     console.log('[IG] download');
@@ -86,6 +94,8 @@ export async function handleInstagram(ctx, statusMsg, text) {
         undefined,
         '❌ 未找到可下载的媒体。',
       );
+      perf.downloadMs = Date.now() - downloadStart;
+      logIgPerfSummary(perf, Date.now() - totalStart);
       return;
     }
 
@@ -97,25 +107,18 @@ export async function handleInstagram(ctx, statusMsg, text) {
       cachedItems.push(cached);
     }
 
-    const downloadMs = Date.now() - downloadStart;
-    console.log(`[IG PERF] download: ${downloadMs}ms`);
-
-    let ffmpegTotalMs = 0;
-    let telegramTotalMs = 0;
+    perf.downloadMs = Date.now() - downloadStart;
 
     for (const cached of cachedItems) {
-      const { ffmpegMs, telegramMs } = await sendIgMedia(ctx, cached);
-      ffmpegTotalMs += ffmpegMs;
-      telegramTotalMs += telegramMs;
+      await sendIgMedia(ctx, cached, perf);
     }
 
-    console.log(`[IG PERF] ffmpeg: ${ffmpegTotalMs}ms`);
-    console.log(`[IG PERF] telegram: ${telegramTotalMs}ms`);
-    console.log(`[IG PERF] total: ${Date.now() - totalStart}ms`);
+    logIgPerfSummary(perf, Date.now() - totalStart);
 
     markProcessed();
     await ctx.telegram.deleteMessage(ctx.chat.id, statusMsg.message_id).catch(() => {});
   } catch (err) {
+    logIgPerfSummary(perf, Date.now() - totalStart);
     const rawMessage = err instanceof Error ? err.message : '未知错误';
     await replyIgError(ctx, statusMsg, rawMessage);
   }

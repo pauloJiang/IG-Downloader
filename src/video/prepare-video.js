@@ -26,7 +26,8 @@ const ASPECT_RATIO_MAX_DRIFT = 0.01;
 /** @typedef {{ profile: string, level: string, preset: string, crf: string }} EncodeOptions */
 
 /**
- * @typedef {{ path: string, sendAs: 'video' | 'document' }} PreparedVideo
+ * @typedef {{ probeInputMs: number, ffmpegMs: number, probeOutputMs: number }} VideoPerfStats
+ * @typedef {{ path: string, sendAs: 'video' | 'document', perf?: VideoPerfStats }} PreparedVideo
  */
 
 /**
@@ -145,14 +146,21 @@ async function assertXVideoBeforeSend(inputProbe, outputPath, requireAudio) {
 
 /**
  * @param {string} inputPath
- * @param {{ platform?: VideoPlatform }} [options]
+ * @param {{ platform?: VideoPlatform, collectPerf?: boolean }} [options]
  * @returns {Promise<PreparedVideo>}
  */
 export async function prepareVideoForTelegram(inputPath, options = {}) {
   const platform = options.platform ?? 'instagram';
+  const collectPerf = options.collectPerf === true;
+  let probeInputMs = 0;
+  let ffmpegMs = 0;
+  let probeOutputMs = 0;
+
   let before;
   try {
+    const probeInputStart = Date.now();
     before = await probeMedia(inputPath);
+    probeInputMs = Date.now() - probeInputStart;
   } catch (err) {
     const reason = err instanceof Error ? err.message : String(err);
     throw new Error(`ffprobe 失败: ${reason}`);
@@ -196,7 +204,11 @@ export async function prepareVideoForTelegram(inputPath, options = {}) {
         height: before.video?.height,
       });
     }
-    return { path: inputPath, sendAs: 'video' };
+    const skipped = { path: inputPath, sendAs: 'video' };
+    if (collectPerf) {
+      skipped.perf = { probeInputMs, ffmpegMs: 0, probeOutputMs: 0 };
+    }
+    return skipped;
   }
 
   if (platform === 'instagram') {
@@ -215,17 +227,25 @@ export async function prepareVideoForTelegram(inputPath, options = {}) {
   console.log(`[video] ${platform === 'instagram' ? 'IG' : 'X'} 转码, hasAudio=`, hasAudio);
 
   try {
+    const ffmpegStart = Date.now();
     transcodeToIosMp4(inputPath, outputPath, hasAudio, scaleFilter, encode);
     await assertTranscodeOutput(outputPath);
+    ffmpegMs = Date.now() - ffmpegStart;
 
+    const probeOutputStart = Date.now();
     if (platform === 'x') {
       await assertXVideoBeforeSend(before, outputPath, hasAudio);
     } else {
       await assertIosMp4BeforeSend(outputPath, hasAudio);
     }
+    probeOutputMs = Date.now() - probeOutputStart;
 
     scheduleCacheDeletion(outputPath);
-    return { path: outputPath, sendAs: 'video' };
+    const prepared = { path: outputPath, sendAs: 'video' };
+    if (collectPerf) {
+      prepared.perf = { probeInputMs, ffmpegMs, probeOutputMs };
+    }
+    return prepared;
   } catch (err) {
     if (fs.existsSync(outputPath)) {
       fs.unlinkSync(outputPath);
