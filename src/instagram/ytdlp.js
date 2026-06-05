@@ -35,8 +35,11 @@ export class YtdlpRunError extends Error {
  */
 export async function ensureYtdlp() {
   try {
-    const { stdout } = await execFileAsync(YTDLP_BIN, ['--version']);
-    console.log('[ytdlp] 已就绪:', stdout.trim().split('\n')[0]);
+    const { stdout, stderr } = await execFileAsync(YTDLP_BIN, ['--version']);
+    const version = (stdout || stderr).trim();
+    console.log('[ytdlp] yt-dlp --version');
+    console.log(version);
+    console.log('[ytdlp] 已就绪:', version.split('\n')[0]);
   } catch {
     throw new Error('未找到 yt-dlp，请安装后重试');
   }

@@ -106,9 +106,9 @@ export function registerAdminCommands(bot) {
       return;
     }
 
-    await ctx.reply('⏳ 正在执行 debugx…');
+    await ctx.reply('⏳ 正在执行 yt-dlp -v …');
     const result = await debugXUrl(url);
-    await ctx.reply(result.summary.slice(0, 4000));
+    await ctx.reply(result.summary.slice(0, 4096));
   });
 
   bot.command('clearcache', async (ctx) => {
