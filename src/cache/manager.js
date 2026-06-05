@@ -20,7 +20,7 @@ async function ensureDir(dir) {
  * @param {string} outTemplate
  * @param {string} downloadUrl
  * @param {'image' | 'video'} type
- * @param {{ playlistIndex?: number, platform?: 'instagram' | 'x' }} [options]
+ * @param {{ playlistIndex?: number }} [options]
  */
 function buildYtdlpDownloadArgs(outTemplate, downloadUrl, type, options = {}) {
   const args = [
@@ -56,7 +56,7 @@ function buildYtdlpDownloadArgs(outTemplate, downloadUrl, type, options = {}) {
 /**
  * @param {string} downloadUrl
  * @param {'image' | 'video'} type
- * @param {{ playlistIndex?: number, platform?: 'instagram' | 'x' }} [options]
+ * @param {{ playlistIndex?: number }} [options]
  * @returns {Promise<{ filePath: string, type: 'image' | 'video' }>}
  */
 export async function downloadToCache(downloadUrl, type, options = {}) {
@@ -65,12 +65,12 @@ export async function downloadToCache(downloadUrl, type, options = {}) {
   const id = randomUUID();
   const outTemplate = path.join(config.cacheDir, `${id}.%(ext)s`);
 
-  console.log('[ytdlp] 下载:', redactUrl(downloadUrl), 'type=', type, 'item=', options.playlistIndex ?? 'all');
+  console.log('[IG] 下载:', redactUrl(downloadUrl), 'type=', type, 'item=', options.playlistIndex ?? 'all');
 
   const args = buildYtdlpDownloadArgs(outTemplate, downloadUrl, type, options);
-  console.log('[ytdlp] 命令:', args.filter((a) => !a.startsWith('http')).join(' '));
+  console.log('[IG] yt-dlp 命令:', args.filter((a) => !a.startsWith('http')).join(' '));
 
-  await runYtdlp(args, { platform: options.platform ?? 'instagram' });
+  await runYtdlp(args);
 
   const filePath = await resolveDownloadedFile(id);
   await logDownloadStreams(filePath);

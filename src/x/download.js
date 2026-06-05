@@ -3,7 +3,7 @@ import fsPromises from 'node:fs/promises';
 import path from 'node:path';
 import { config } from '../config.js';
 import { redactUrl } from '../http/fetch-helper.js';
-import { runYtdlp } from '../instagram/ytdlp.js';
+import { runXYtdlp } from './ytdlp.js';
 import { scheduleCacheDeletion } from '../cache/manager.js';
 import { logDownloadStreams, hasAudioStream } from '../video/ffprobe-log.js';
 import { xCookieExists } from './cookies.js';
@@ -17,7 +17,7 @@ const MIN_VIDEO_BYTES = 100_000;
 function logFileState(label, filePath) {
   const fileExists = fs.existsSync(filePath);
   const fileSize = fileExists ? fs.statSync(filePath).size : 0;
-  console.log(`[x] ${label}:`, { outputPath: filePath, fileExists, fileSize });
+  console.log(`[X] ${label}:`, { outputPath: filePath, fileExists, fileSize });
   return { fileExists, fileSize };
 }
 
@@ -47,10 +47,14 @@ function buildXDownloadArgs(usingCookies, outTemplate, url) {
  * @returns {Promise<string>}
  */
 async function fetchXVideoId(url) {
-  const { stdout } = await runYtdlp(
-    ['--print', 'id', '--no-playlist', '--no-warnings', '-s', url],
-    { platform: 'x', useCookies: true },
-  );
+  const { stdout } = await runXYtdlp([
+    '--print',
+    'id',
+    '--no-playlist',
+    '--no-warnings',
+    '-s',
+    url,
+  ]);
   const id = stdout.trim();
   if (!id) {
     throw new Error('无法解析 X 视频 ID');
@@ -93,23 +97,23 @@ export async function downloadXVideo(url) {
   await fsPromises.mkdir(config.cacheDir, { recursive: true });
 
   const usingCookies = xCookieExists();
-  console.log(`Using X Cookies: ${usingCookies}`);
+  console.log(`[X] Using X Cookies: ${usingCookies}`);
 
   const outTemplate = path.join(config.cacheDir, '%(id)s.%(ext)s');
   const args = buildXDownloadArgs(usingCookies, outTemplate, url);
 
-  console.log('[x] 下载视频:', redactUrl(url));
-  console.log('[x] yt-dlp 命令:', args.filter((a) => !a.startsWith('http')).join(' '));
+  console.log('[X] download:', redactUrl(url));
+  console.log('[X] yt-dlp 命令:', args.filter((a) => !a.startsWith('http')).join(' '));
 
   const videoId = await fetchXVideoId(url);
 
   /** @type {Error | null} */
   let ytdlpError = null;
   try {
-    await runYtdlp(args, { platform: 'x', useCookies: true });
+    await runXYtdlp(args);
   } catch (err) {
     ytdlpError = err instanceof Error ? err : new Error(String(err));
-    console.warn('[x] yt-dlp 下载报错，尝试使用已落盘文件:', ytdlpError.message);
+    console.warn('[X] yt-dlp 下载报错，尝试使用已落盘文件:', ytdlpError.message);
   }
 
   const filePath = await resolveXFileById(videoId);
@@ -117,7 +121,7 @@ export async function downloadXVideo(url) {
 
   if (fileExists && fileSize > MIN_VIDEO_BYTES) {
     if (ytdlpError) {
-      console.warn('[x] yt-dlp 报错但文件有效 (>100KB)，继续处理');
+      console.warn('[X] yt-dlp 报错但文件有效 (>100KB)，继续处理');
     }
 
     await logDownloadStreams(filePath);

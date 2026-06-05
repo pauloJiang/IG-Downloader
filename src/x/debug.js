@@ -1,4 +1,4 @@
-import { runYtdlp, YtdlpRunError } from '../instagram/ytdlp.js';
+import { runXYtdlp, YtdlpRunError } from './ytdlp.js';
 import { redactUrl } from '../http/fetch-helper.js';
 import { parseXUrl } from './url.js';
 
@@ -25,10 +25,7 @@ export async function debugXUrl(text) {
   const urlLabel = redactUrl(parsed.url);
 
   try {
-    const { stderr } = await runYtdlp(['-v', '--no-playlist', parsed.url], {
-      platform: 'x',
-      useCookies: true,
-    });
+    const { stderr } = await runXYtdlp(['-v', '--no-playlist', parsed.url]);
 
     return {
       ok: true,

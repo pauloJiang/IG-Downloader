@@ -2,8 +2,6 @@ import { execFile, spawn } from 'node:child_process';
 import { promisify } from 'node:util';
 import { redactUrl } from '../http/fetch-helper.js';
 import { getYtdlpCookieArgs } from './cookies.js';
-import { getXCookieArgs } from '../x/cookies.js';
-import { isXAuthError } from '../x/errors.js';
 
 const execFileAsync = promisify(execFile);
 
@@ -11,22 +9,6 @@ const YTDLP_BIN = process.env.YTDLP_BIN || 'yt-dlp';
 
 export const IG_AUTH_ERROR =
   'Instagram 需要登录或当前IP被限流，请稍后再试或更新 cookies。';
-
-/** @typedef {'instagram' | 'x'} YtdlpPlatform */
-
-export class YtdlpRunError extends Error {
-  /**
-   * @param {string} message
-   * @param {{ stderr?: string, stdout?: string, code?: number | null }} [details]
-   */
-  constructor(message, details = {}) {
-    super(message);
-    this.name = 'YtdlpRunError';
-    this.stderr = details.stderr ?? '';
-    this.stdout = details.stdout ?? '';
-    this.code = details.code ?? null;
-  }
-}
 
 /**
  * @typedef {{ type: 'image' | 'video', url: string, playlistIndex?: number }} MediaItem
@@ -49,16 +31,8 @@ export async function ensureYtdlp() {
 
 /**
  * @param {string} message
- * @param {YtdlpPlatform} [platform]
  */
-export function mapYtdlpError(message, platform = 'instagram') {
-  if (platform === 'x') {
-    if (isXAuthError(message)) {
-      return new Error('X 需要登录验证');
-    }
-    return new Error('X 视频下载失败');
-  }
-
+export function mapYtdlpError(message) {
   const lower = message.toLowerCase();
   if (
     lower.includes('login required') ||
@@ -75,23 +49,10 @@ export function mapYtdlpError(message, platform = 'instagram') {
 
 /**
  * @param {string[]} args
- * @param {{ platform?: YtdlpPlatform, useCookies?: boolean }} [options]
  * @returns {Promise<{ stdout: string, stderr: string }>}
  */
-/**
- * @param {YtdlpPlatform} platform
- * @param {boolean} useCookies
- */
-function resolveCookieArgs(platform, useCookies) {
-  if (!useCookies) return [];
-  if (platform === 'x') return getXCookieArgs();
-  return getYtdlpCookieArgs();
-}
-
-export async function runYtdlp(args, options = {}) {
-  const platform = options.platform ?? 'instagram';
-  const useCookies = options.useCookies ?? true;
-  const fullArgs = [...resolveCookieArgs(platform, useCookies), ...args];
+export async function runYtdlp(args) {
+  const fullArgs = [...getYtdlpCookieArgs(), ...args];
 
   return new Promise((resolve, reject) => {
     const proc = spawn(YTDLP_BIN, fullArgs, { stdio: ['ignore', 'pipe', 'pipe'] });
@@ -111,19 +72,7 @@ export async function runYtdlp(args, options = {}) {
       if (code !== 0) {
         const msg = stderr.trim() || stdout.trim() || `yt-dlp 退出码 ${code}`;
 
-        if (platform === 'x') {
-          console.error('[x] yt-dlp stderr (last 1200 chars):\n', stderr.slice(-1200));
-          reject(
-            new YtdlpRunError(mapYtdlpError(msg, platform).message, {
-              stderr,
-              stdout,
-              code,
-            }),
-          );
-          return;
-        }
-
-        reject(mapYtdlpError(msg.slice(0, 500), platform));
+        reject(mapYtdlpError(msg.slice(0, 500)));
         return;
       }
       resolve({ stdout, stderr });
@@ -136,7 +85,7 @@ export async function runYtdlp(args, options = {}) {
  * @returns {Promise<MediaItem[]>}
  */
 export async function fetchInstagramMedia(instagramUrl) {
-  console.log('[ytdlp] 解析:', redactUrl(instagramUrl));
+  console.log('[IG] 解析:', redactUrl(instagramUrl));
 
   const { stdout } = await runYtdlp(['-J', '--no-warnings', '--no-progress', instagramUrl]);
 
@@ -152,7 +101,7 @@ export async function fetchInstagramMedia(instagramUrl) {
     throw new Error('未找到可下载的媒体');
   }
 
-  console.log('[ytdlp] 找到', items.length, '个媒体');
+  console.log('[IG] 找到', items.length, '个媒体');
   return items;
 }
 
