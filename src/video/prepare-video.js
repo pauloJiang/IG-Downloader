@@ -7,7 +7,6 @@ import { scheduleCacheDeletion } from '../cache/manager.js';
 import {
   probeMedia,
   logProbeResult,
-  validateIosMp4,
   canSendWithoutTranscode,
   canIgSkipTranscode,
   getIgIncompatibleCodecLabel,
@@ -15,10 +14,12 @@ import {
 
 const FFMPEG_BIN = process.env.FFMPEG_BIN || 'ffmpeg';
 const MIN_VIDEO_BYTES = 100_000;
-const IG_VIDEO_SCALE_FILTER = "scale='min(720,iw)':-2,fps=30,format=yuv420p";
+const IG_VIDEO_SCALE_FILTER =
+  "scale='if(gt(iw,720),720,iw)':-2,fps=30,format=yuv420p";
 const X_VIDEO_SCALE_FILTER =
   "scale='if(gt(iw,1080),1080,iw)':-2,fps=30,format=yuv420p";
-const IG_ENCODE = { profile: 'baseline', level: '3.1', preset: 'ultrafast', crf: '24' };
+const IG_ENCODE = { profile: 'baseline', level: '3.1', preset: 'veryfast', crf: '23' };
+export const IG_ASPECT_RATIO_ERROR = '视频比例异常，已取消发送';
 const X_ENCODE = { profile: 'main', level: '4.0', preset: 'veryfast', crf: '23' };
 const ASPECT_RATIO_MAX_DRIFT = 0.01;
 
@@ -64,17 +65,6 @@ async function assertTranscodeOutput(outputPath) {
 }
 
 /**
- * @param {string} filePath
- * @param {boolean} requireAudio
- */
-async function assertIosMp4BeforeSend(filePath, requireAudio) {
-  const probe = await probeMedia(filePath);
-  logProbeResult(filePath, '发送前验证', probe);
-  validateIosMp4(probe, requireAudio);
-  console.log('[video] iOS/Telegram 兼容性验证通过');
-}
-
-/**
  * @param {number | undefined} width
  * @param {number | undefined} height
  */
@@ -86,14 +76,16 @@ function getAspectRatio(width, height) {
 /**
  * @param {import('./ffprobe-log.js').MediaProbe} inputProbe
  * @param {import('./ffprobe-log.js').MediaProbe} outputProbe
+ * @param {{ logTag?: string, aspectRatioError?: string }} [options]
  */
-function assertAspectRatioPreserved(inputProbe, outputProbe) {
+function assertAspectRatioPreserved(inputProbe, outputProbe, options = {}) {
+  const logTag = options.logTag ?? '[x]';
   const inW = inputProbe.video?.width;
   const inH = inputProbe.video?.height;
   const outW = outputProbe.video?.width;
   const outH = outputProbe.video?.height;
 
-  console.log('[x] 发送前尺寸对比:', {
+  console.log(`${logTag} 发送前尺寸对比:`, {
     input: { width: inW, height: inH },
     output: { width: outW, height: outH },
   });
@@ -105,7 +97,7 @@ function assertAspectRatioPreserved(inputProbe, outputProbe) {
   }
 
   const drift = Math.abs(inRatio - outRatio) / inRatio;
-  console.log('[x] 宽高比:', {
+  console.log(`${logTag} 宽高比:`, {
     input: inRatio.toFixed(6),
     output: outRatio.toFixed(6),
     driftPercent: `${(drift * 100).toFixed(3)}%`,
@@ -113,9 +105,24 @@ function assertAspectRatioPreserved(inputProbe, outputProbe) {
 
   if (drift > ASPECT_RATIO_MAX_DRIFT) {
     throw new Error(
-      `比例异常: 输入 ${inW}x${inH} → 输出 ${outW}x${outH}，偏差 ${(drift * 100).toFixed(2)}%`,
+      options.aspectRatioError ??
+        `比例异常: 输入 ${inW}x${inH} → 输出 ${outW}x${outH}，偏差 ${(drift * 100).toFixed(2)}%`,
     );
   }
+}
+
+/**
+ * @param {import('./ffprobe-log.js').MediaProbe} inputProbe
+ * @param {string} outputPath
+ */
+async function assertIgVideoBeforeSend(inputProbe, outputPath) {
+  const outputProbe = await probeMedia(outputPath);
+  logProbeResult(outputPath, 'IG 发送前验证', outputProbe);
+  assertAspectRatioPreserved(inputProbe, outputProbe, {
+    logTag: '[IG]',
+    aspectRatioError: IG_ASPECT_RATIO_ERROR,
+  });
+  console.log('[IG] 转码输出验证通过');
 }
 
 /**
@@ -189,14 +196,31 @@ export async function prepareVideoForTelegram(inputPath, options = {}) {
     throw new Error(`原视频文件过小: ${inputSize} bytes`);
   }
 
-  const shouldSkipTranscode =
-    platform === 'instagram'
-      ? canIgSkipTranscode(before, hasAudio)
-      : canSendWithoutTranscode(before, hasAudio);
+  let shouldSkipTranscode = false;
+  if (platform === 'instagram') {
+    shouldSkipTranscode = canIgSkipTranscode(before, hasAudio);
+
+    if (shouldSkipTranscode) {
+      console.log('🚀 原视频已兼容，跳过转码');
+      console.log('[IG] 直发尺寸:', {
+        width: before.video?.width,
+        height: before.video?.height,
+      });
+    } else {
+      const codecLabel = getIgIncompatibleCodecLabel(before);
+      if (codecLabel) {
+        console.log(`🔄 检测到 ${codecLabel}，开始转码`);
+      } else {
+        console.log('🔄 编码不符合 h264/aac/yuv420p，开始转码');
+      }
+    }
+  } else {
+    shouldSkipTranscode = canSendWithoutTranscode(before, hasAudio);
+  }
 
   if (shouldSkipTranscode) {
     if (platform === 'instagram') {
-      console.log('🚀 原视频已兼容，跳过转码');
+      // logged above
     } else {
       console.log('🚀 兼容视频，直接发送');
       console.log('[x] 直发尺寸:', {
@@ -211,14 +235,7 @@ export async function prepareVideoForTelegram(inputPath, options = {}) {
     return skipped;
   }
 
-  if (platform === 'instagram') {
-    const codecLabel = getIgIncompatibleCodecLabel(before);
-    if (codecLabel) {
-      console.log(`🔄 检测到 ${codecLabel}，开始转码`);
-    } else {
-      console.log('🔄 检测到不兼容编码，开始转码');
-    }
-  } else {
+  if (platform !== 'instagram') {
     console.log('🔄 检测到不兼容编码，开始转码');
   }
   const scaleFilter = platform === 'instagram' ? IG_VIDEO_SCALE_FILTER : X_VIDEO_SCALE_FILTER;
@@ -236,7 +253,7 @@ export async function prepareVideoForTelegram(inputPath, options = {}) {
     if (platform === 'x') {
       await assertXVideoBeforeSend(before, outputPath, hasAudio);
     } else {
-      await assertIosMp4BeforeSend(outputPath, hasAudio);
+      await assertIgVideoBeforeSend(before, outputPath);
     }
     probeOutputMs = Date.now() - probeOutputStart;
 
@@ -254,6 +271,9 @@ export async function prepareVideoForTelegram(inputPath, options = {}) {
     const reason = err instanceof Error ? err.message : String(err);
 
     if (platform === 'instagram') {
+      if (reason === IG_ASPECT_RATIO_ERROR || reason.includes('比例异常')) {
+        throw new Error(IG_ASPECT_RATIO_ERROR);
+      }
       throw new Error(`IG 视频转码失败: ${reason}`);
     }
 

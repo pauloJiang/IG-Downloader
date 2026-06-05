@@ -2,7 +2,7 @@ import { Input } from 'telegraf';
 import { parseInstagramUrl } from './url.js';
 import { fetchInstagramMedia } from './fetcher.js';
 import { downloadToCache } from '../cache/manager.js';
-import { prepareVideoForTelegram } from '../video/prepare-video.js';
+import { prepareVideoForTelegram, IG_ASPECT_RATIO_ERROR } from '../video/prepare-video.js';
 import { notifyAdminCookieFailure } from '../admin/notify.js';
 import { getUserFacingIgError } from '../admin/cookie-errors.js';
 import { markProcessed } from '../admin/stats.js';
@@ -14,11 +14,19 @@ import { createIgPerfTotals, logIgPerfSummary } from './perf.js';
  * @param {string} rawMessage
  */
 async function replyIgError(ctx, statusMsg, rawMessage) {
-  const message = getUserFacingIgError(rawMessage);
-  await notifyAdminCookieFailure(rawMessage);
+  const isAspectRatioError =
+    rawMessage === IG_ASPECT_RATIO_ERROR || rawMessage.includes('视频比例异常');
+  const message = isAspectRatioError
+    ? '❌ 视频比例异常，已取消发送'
+    : `❌ 处理失败：${getUserFacingIgError(rawMessage)}`;
+
+  if (!isAspectRatioError) {
+    await notifyAdminCookieFailure(rawMessage);
+  }
+
   await ctx.telegram
-    .editMessageText(ctx.chat.id, statusMsg.message_id, undefined, `❌ 处理失败：${message}`)
-    .catch(() => ctx.reply(`❌ 处理失败：${message}`));
+    .editMessageText(ctx.chat.id, statusMsg.message_id, undefined, message)
+    .catch(() => ctx.reply(message));
 }
 
 /**

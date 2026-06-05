@@ -4,7 +4,7 @@ import { randomUUID } from 'node:crypto';
 import { config } from '../config.js';
 import { redactUrl } from '../http/fetch-helper.js';
 import { runYtdlp } from '../instagram/ytdlp.js';
-import { logDownloadStreams, hasAudioStream } from '../video/ffprobe-log.js';
+import { logDownloadStreams } from '../video/ffprobe-log.js';
 
 /** @type {Map<string, NodeJS.Timeout>} */
 const deletionTimers = new Map();
@@ -74,10 +74,6 @@ export async function downloadToCache(downloadUrl, type, options = {}) {
 
   const filePath = await resolveDownloadedFile(id);
   await logDownloadStreams(filePath);
-
-  if (type === 'video' && !(await hasAudioStream(filePath))) {
-    console.log('🎬 视频无音频轨，已按静音视频处理');
-  }
 
   scheduleCacheDeletion(filePath);
 
