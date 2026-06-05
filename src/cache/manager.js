@@ -6,8 +6,6 @@ import { redactUrl } from '../http/fetch-helper.js';
 import { runYtdlp } from '../instagram/ytdlp.js';
 import { logDownloadStreams, hasAudioStream } from '../video/ffprobe-log.js';
 
-export const NO_AUDIO_STREAM_ERROR = '下载结果没有音频流';
-
 /** @type {Map<string, NodeJS.Timeout>} */
 const deletionTimers = new Map();
 
@@ -78,7 +76,7 @@ export async function downloadToCache(downloadUrl, type, options = {}) {
   await logDownloadStreams(filePath);
 
   if (type === 'video' && !(await hasAudioStream(filePath))) {
-    throw new Error(NO_AUDIO_STREAM_ERROR);
+    console.log('🎬 视频无音频轨，已按静音视频处理');
   }
 
   scheduleCacheDeletion(filePath);

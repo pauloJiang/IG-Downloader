@@ -78,6 +78,10 @@ export async function prepareVideoForTelegram(inputPath) {
   const hasAudio = Boolean(before.audio);
   const inputSize = getFileSize(inputPath);
 
+  if (!hasAudio) {
+    console.log('🎬 视频无音频轨，已按静音视频处理');
+  }
+
   console.log('[video] 输入检测:', {
     file: path.basename(inputPath),
     size: inputSize,
