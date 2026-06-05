@@ -4,6 +4,7 @@ import { createBot } from './bot.js';
 import { ensureYtdlp } from './instagram/ytdlp.js';
 import { initIgCookies } from './instagram/cookies.js';
 import { initWhitelist } from './admin/whitelist.js';
+import { initXCacheDir } from './x/download.js';
 
 async function main() {
   if (!config.botToken) {
@@ -19,6 +20,7 @@ async function main() {
   await initIgCookies();
   await initWhitelist();
   await initCacheDir();
+  await initXCacheDir();
 
   const bot = createBot();
 

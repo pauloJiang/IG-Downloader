@@ -9,6 +9,8 @@ import { registerAdminCommands } from './admin/commands.js';
 import { setNotifyBot, notifyAdminCookieFailure } from './admin/notify.js';
 import { getUserFacingIgError } from './admin/cookie-errors.js';
 import { markProcessed } from './admin/stats.js';
+import { containsXUrl } from './x/url.js';
+import { handleX } from './x/handler.js';
 
 const HELP_TEXT = `📖 *使用帮助*
 
@@ -106,6 +108,11 @@ export function createBot() {
     const text = ctx.message.text;
 
     if (text.startsWith('/')) return;
+
+    if (containsXUrl(text)) {
+      await handleX(ctx, text);
+      return;
+    }
 
     if (!containsInstagramUrl(text)) return;
 
