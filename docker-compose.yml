@@ -6,15 +6,12 @@ services:
       BOT_TOKEN: ${BOT_TOKEN}
       ADMIN_TG_ID: ${ADMIN_TG_ID}
       CACHE_DIR: /tmp/ig-cache
-      X_CACHE_DIR: /tmp/x-cache
       COOKIES_PATH: /data/cookies.txt
       DATA_DIR: /data
     volumes:
       - ig-cache:/tmp/ig-cache
-      - x-cache:/tmp/x-cache
       - bot-data:/data
 
 volumes:
   ig-cache:
-  x-cache:
   bot-data:

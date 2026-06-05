@@ -44,10 +44,3 @@ export function parseInstagramUrl(text) {
 export function containsInstagramUrl(text) {
   return parseInstagramUrl(text) !== null;
 }
-
-/**
- * @param {string} url
- */
-export function isInstagramUrl(url) {
-  return url.toLowerCase().includes('instagram.com');
-}
