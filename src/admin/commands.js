@@ -3,15 +3,10 @@ import { config } from '../config.js';
 import { isAdmin } from './auth.js';
 import { addUser, removeUser, listUsers } from './whitelist.js';
 import { saveCookieFile, isValidCookieContent } from './cookie-file.js';
-import { saveXCookieFile, isValidXCookieContent } from '../x/cookies.js';
 import { getBotStatus, clearCacheFiles } from './stats.js';
-import { debugXUrl } from '../x/debug.js';
 
 /** @type {Set<number>} */
 export const awaitingCookieUpload = new Set();
-
-/** @type {Set<number>} */
-export const awaitingXCookieUpload = new Set();
 
 /**
  * @param {import('telegraf').Context} ctx
@@ -80,17 +75,6 @@ export function registerAdminCommands(bot) {
     await ctx.reply('请发送新的 cookies.txt 文件');
   });
 
-  bot.command('uploadxcookie', async (ctx) => {
-    if (!isAdmin(ctx.from?.id)) {
-      await ctx.reply('❌ 仅管理员可用');
-      return;
-    }
-
-    const adminId = ctx.from.id;
-    awaitingXCookieUpload.add(adminId);
-    await ctx.reply('请上传 x.com_cookies.txt');
-  });
-
   bot.command('status', async (ctx) => {
     if (!isAdmin(ctx.from?.id)) {
       await ctx.reply('❌ 仅管理员可用');
@@ -109,23 +93,6 @@ export function registerAdminCommands(bot) {
     );
   });
 
-  bot.command('debugx', async (ctx) => {
-    if (!isAdmin(ctx.from?.id)) {
-      await ctx.reply('❌ 仅管理员可用');
-      return;
-    }
-
-    const url = parseUrlFromCommand(ctx.message.text);
-    if (!url) {
-      await ctx.reply('用法：/debugx https://x.com/xxx/status/123');
-      return;
-    }
-
-    await ctx.reply('⏳ 正在执行 yt-dlp -v …');
-    const result = await debugXUrl(url);
-    await ctx.reply(result.summary.slice(0, 4096));
-  });
-
   bot.command('clearcache', async (ctx) => {
     if (!isAdmin(ctx.from?.id)) {
       await ctx.reply('❌ 仅管理员可用');
@@ -138,41 +105,7 @@ export function registerAdminCommands(bot) {
 
   bot.on('document', async (ctx, next) => {
     const userId = ctx.from?.id;
-    if (!userId || !isAdmin(userId)) {
-      return next();
-    }
-
-    if (awaitingXCookieUpload.has(userId)) {
-      awaitingXCookieUpload.delete(userId);
-
-      const doc = ctx.message.document;
-      const fileName = doc.file_name || '';
-
-      if (!fileName.toLowerCase().includes('cookie') && !fileName.endsWith('.txt')) {
-        await ctx.reply('❌ X Cookie文件无效');
-        return;
-      }
-
-      try {
-        const fileLink = await ctx.telegram.getFileLink(doc.file_id);
-        const response = await fetch(fileLink.href);
-        const content = await response.text();
-
-        if (!isValidXCookieContent(content)) {
-          await ctx.reply('❌ X Cookie文件无效');
-          return;
-        }
-
-        await saveXCookieFile(content);
-        await ctx.reply('✅ X Cookie 更新成功');
-      } catch (err) {
-        console.error('[uploadxcookie] 失败:', err);
-        await ctx.reply('❌ X Cookie文件无效');
-      }
-      return;
-    }
-
-    if (!awaitingCookieUpload.has(userId)) {
+    if (!userId || !awaitingCookieUpload.has(userId) || !isAdmin(userId)) {
       return next();
     }
 
@@ -213,13 +146,4 @@ function parseUserIdFromCommand(text) {
   const parts = text.trim().split(/\s+/);
   const id = Number(parts[1]);
   return Number.isFinite(id) ? id : null;
-}
-
-/**
- * @param {string | undefined} text
- */
-function parseUrlFromCommand(text) {
-  if (!text) return null;
-  const match = text.match(/https?:\/\/[^\s]+/i);
-  return match ? match[0].replace(/[)>]+$/g, '') : null;
 }

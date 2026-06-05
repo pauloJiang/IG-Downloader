@@ -3,7 +3,6 @@ import { initCacheDir } from './cache/manager.js';
 import { createBot } from './bot.js';
 import { ensureYtdlp } from './instagram/ytdlp.js';
 import { initIgCookies } from './instagram/cookies.js';
-import { initXCookies, logXCookiesStartup } from './x/cookies.js';
 import { initWhitelist } from './admin/whitelist.js';
 
 async function main() {
@@ -18,19 +17,14 @@ async function main() {
 
   await ensureYtdlp();
   await initIgCookies();
-  await initXCookies();
-  logXCookiesStartup();
   await initWhitelist();
   await initCacheDir();
 
   const bot = createBot();
 
   bot.catch((err, ctx) => {
-    console.error('[IG ERROR]', err);
-    if (err instanceof Error && err.stack) {
-      console.error('[IG ERROR] stack:', err.stack);
-    }
-    ctx.reply('❌ 处理失败，请稍后重试').catch(() => {});
+    console.error('Bot error:', err);
+    ctx.reply('❌ 发生内部错误，请稍后重试。').catch(() => {});
   });
 
   console.log('Telegram IG Bot 启动中…');

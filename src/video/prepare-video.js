@@ -7,17 +7,12 @@ import { scheduleCacheDeletion } from '../cache/manager.js';
 import {
   probeMedia,
   logProbeResult,
-  canSendWithoutTranscode,
+  validateIosMp4,
+  isIosMp4Compatible,
 } from './ffprobe-log.js';
 
 const FFMPEG_BIN = process.env.FFMPEG_BIN || 'ffmpeg';
 const MIN_VIDEO_BYTES = 100_000;
-const X_VIDEO_SCALE_FILTER =
-  "scale='if(gt(iw,1080),1080,iw)':-2,fps=30,format=yuv420p";
-const X_ENCODE = { profile: 'main', level: '4.0', preset: 'veryfast', crf: '23' };
-const ASPECT_RATIO_MAX_DRIFT = 0.01;
-
-/** @typedef {{ profile: string, level: string, preset: string, crf: string }} EncodeOptions */
 
 /**
  * @typedef {{ path: string, sendAs: 'video' | 'document' }} PreparedVideo
@@ -57,81 +52,21 @@ async function assertTranscodeOutput(outputPath) {
 }
 
 /**
- * @param {number | undefined} width
- * @param {number | undefined} height
- */
-function getAspectRatio(width, height) {
-  if (!width || !height) return null;
-  return width / height;
-}
-
-/**
- * @param {import('./ffprobe-log.js').MediaProbe} inputProbe
- * @param {import('./ffprobe-log.js').MediaProbe} outputProbe
- */
-function assertAspectRatioPreserved(inputProbe, outputProbe) {
-  const inW = inputProbe.video?.width;
-  const inH = inputProbe.video?.height;
-  const outW = outputProbe.video?.width;
-  const outH = outputProbe.video?.height;
-
-  console.log('[x] 发送前尺寸对比:', {
-    input: { width: inW, height: inH },
-    output: { width: outW, height: outH },
-  });
-
-  const inRatio = getAspectRatio(inW, inH);
-  const outRatio = getAspectRatio(outW, outH);
-  if (!inRatio || !outRatio) {
-    throw new Error('无法获取视频宽高，比例校验失败');
-  }
-
-  const drift = Math.abs(inRatio - outRatio) / inRatio;
-  console.log('[x] 宽高比:', {
-    input: inRatio.toFixed(6),
-    output: outRatio.toFixed(6),
-    driftPercent: `${(drift * 100).toFixed(3)}%`,
-  });
-
-  if (drift > ASPECT_RATIO_MAX_DRIFT) {
-    throw new Error(
-      `比例异常: 输入 ${inW}x${inH} → 输出 ${outW}x${outH}，偏差 ${(drift * 100).toFixed(2)}%`,
-    );
-  }
-}
-
-/**
- * @param {import('./ffprobe-log.js').MediaProbe} inputProbe
- * @param {string} outputPath
+ * @param {string} filePath
  * @param {boolean} requireAudio
  */
-async function assertXVideoBeforeSend(inputProbe, outputPath, requireAudio) {
-  const outputProbe = await probeMedia(outputPath);
-  logProbeResult(outputPath, 'X 发送前验证', outputProbe);
-  assertAspectRatioPreserved(inputProbe, outputProbe);
-
-  if (!outputProbe.video) {
-    throw new Error('无视频流');
-  }
-  if (outputProbe.video.codec_name !== 'h264') {
-    throw new Error(`video codec=${outputProbe.video.codec_name ?? 'none'}，需要 h264`);
-  }
-  if (outputProbe.video.pix_fmt !== 'yuv420p') {
-    throw new Error(`pix_fmt=${outputProbe.video.pix_fmt ?? 'none'}，需要 yuv420p`);
-  }
-  if (requireAudio && (!outputProbe.audio || outputProbe.audio.codec_name !== 'aac')) {
-    throw new Error(`audio codec=${outputProbe.audio?.codec_name ?? 'none'}，需要 aac`);
-  }
-
-  console.log('[x] 转码输出验证通过');
+async function assertIosMp4BeforeSend(filePath, requireAudio) {
+  const probe = await probeMedia(filePath);
+  logProbeResult(filePath, '发送前验证', probe);
+  validateIosMp4(probe, requireAudio);
+  console.log('[video] iOS/Telegram 兼容性验证通过');
 }
 
 /**
  * @param {string} inputPath
- * @param {{ platform?: 'x' }} [options]
  * @returns {Promise<PreparedVideo>}
  */
-export async function prepareVideoForTelegram(inputPath, options = {}) {
+export async function prepareVideoForTelegram(inputPath) {
   let before;
   try {
     before = await probeMedia(inputPath);
@@ -151,11 +86,6 @@ export async function prepareVideoForTelegram(inputPath, options = {}) {
     file: path.basename(inputPath),
     size: inputSize,
     hasAudio,
-    width: before.video?.width,
-    height: before.video?.height,
-    video_codec: before.video?.codec_name,
-    pix_fmt: before.video?.pix_fmt,
-    audio_codec: before.audio?.codec_name ?? '(none)',
   });
   logProbeResult(inputPath, '输入', before);
 
@@ -163,47 +93,30 @@ export async function prepareVideoForTelegram(inputPath, options = {}) {
     throw new Error(`原视频文件过小: ${inputSize} bytes`);
   }
 
-  const shouldSkipTranscode = canSendWithoutTranscode(before, hasAudio);
-
-  if (shouldSkipTranscode) {
-    console.log('🚀 兼容视频，直接发送');
-    console.log('[x] 直发尺寸:', {
-      width: before.video?.width,
-      height: before.video?.height,
-    });
+  if (isIosMp4Compatible(before, hasAudio)) {
+    console.log('[video] 已符合 iOS MP4 规范，直接发送');
+    await assertIosMp4BeforeSend(inputPath, hasAudio);
     return { path: inputPath, sendAs: 'video' };
   }
 
-  console.log('🔄 检测到不兼容编码，开始转码');
   const outputPath = path.join(config.cacheDir, `${randomUUID()}-ios.mp4`);
-  console.log('[video] X 转码, hasAudio=', hasAudio);
+  console.log('[video] 开始转码为 iOS 兼容 MP4, hasAudio=', hasAudio);
 
   try {
-    transcodeToIosMp4(inputPath, outputPath, hasAudio, X_VIDEO_SCALE_FILTER, X_ENCODE);
+    transcodeToIosMp4(inputPath, outputPath, hasAudio);
     await assertTranscodeOutput(outputPath);
-    await assertXVideoBeforeSend(before, outputPath, hasAudio);
-
+    await assertIosMp4BeforeSend(outputPath, hasAudio);
     scheduleCacheDeletion(outputPath);
     return { path: outputPath, sendAs: 'video' };
   } catch (err) {
+    const reason = err instanceof Error ? err.message : String(err);
+    console.warn('[video] 转码/验证失败，改用原视频 document 发送:', reason);
+
     if (fs.existsSync(outputPath)) {
       fs.unlinkSync(outputPath);
     }
 
-    const reason = err instanceof Error ? err.message : String(err);
-    const inputExists = fs.existsSync(inputPath);
-    const fallbackSize = getFileSize(inputPath);
-
-    if (inputExists && fallbackSize > MIN_VIDEO_BYTES) {
-      console.warn('[x] 转码/验证失败，使用原文件 replyWithVideo:', reason);
-      return { path: inputPath, sendAs: 'video' };
-    }
-
-    if (reason.includes('比例异常')) {
-      throw new Error(reason);
-    }
-
-    throw new Error(`X 视频处理失败: ${reason}`);
+    return { path: inputPath, sendAs: 'document' };
   }
 }
 
@@ -212,23 +125,23 @@ export async function prepareVideoForTelegram(inputPath, options = {}) {
  * @param {string} outputPath
  * @param {boolean} hasAudio
  */
-function buildFfmpegArgs(inputPath, outputPath, hasAudio, scaleFilter, encode) {
+function buildFfmpegArgs(inputPath, outputPath, hasAudio) {
   const args = [
     '-y',
     '-i',
     inputPath,
     '-vf',
-    scaleFilter,
+    'scale=720:-2,fps=30,format=yuv420p',
     '-c:v',
     'libx264',
     '-profile:v',
-    encode.profile,
+    'baseline',
     '-level',
-    encode.level,
+    '3.1',
     '-preset',
-    encode.preset,
+    'veryfast',
     '-crf',
-    encode.crf,
+    '23',
   ];
 
   if (hasAudio) {
@@ -246,8 +159,8 @@ function buildFfmpegArgs(inputPath, outputPath, hasAudio, scaleFilter, encode) {
  * @param {string} outputPath
  * @param {boolean} hasAudio
  */
-function transcodeToIosMp4(inputPath, outputPath, hasAudio, scaleFilter, encode) {
-  const args = buildFfmpegArgs(inputPath, outputPath, hasAudio, scaleFilter, encode);
+function transcodeToIosMp4(inputPath, outputPath, hasAudio) {
+  const args = buildFfmpegArgs(inputPath, outputPath, hasAudio);
 
   console.log('[ffmpeg] 命令:', FFMPEG_BIN, args.join(' '));
 

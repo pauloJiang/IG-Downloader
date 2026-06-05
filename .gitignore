@@ -4,7 +4,6 @@ node_modules/
 *.log
 
 data/cookies.txt
-data/x_cookies.txt
 data/whitelist.json
 /tmp
 *.cookie

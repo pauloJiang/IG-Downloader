@@ -24,7 +24,6 @@ export async function initWhitelist() {
   }
 
   console.log('[whitelist] 当前人数:', whitelist.size);
-  console.log(`[IG] Whitelist: loaded in memory (${whitelist.size} users)`);
 }
 
 /**

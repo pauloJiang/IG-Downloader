@@ -19,11 +19,8 @@ export const IG_AUTH_ERROR =
  */
 export async function ensureYtdlp() {
   try {
-    const { stdout, stderr } = await execFileAsync(YTDLP_BIN, ['--version']);
-    const version = (stdout || stderr).trim();
-    console.log('[ytdlp] yt-dlp --version');
-    console.log(version);
-    console.log('[ytdlp] 已就绪:', version.split('\n')[0]);
+    const { stdout } = await execFileAsync(YTDLP_BIN, ['--version']);
+    console.log('[ytdlp] 已就绪:', stdout.trim().split('\n')[0]);
   } catch {
     throw new Error('未找到 yt-dlp，请安装后重试');
   }
@@ -71,7 +68,6 @@ export async function runYtdlp(args) {
     proc.on('close', (code) => {
       if (code !== 0) {
         const msg = stderr.trim() || stdout.trim() || `yt-dlp 退出码 ${code}`;
-
         reject(mapYtdlpError(msg.slice(0, 500)));
         return;
       }
@@ -85,7 +81,7 @@ export async function runYtdlp(args) {
  * @returns {Promise<MediaItem[]>}
  */
 export async function fetchInstagramMedia(instagramUrl) {
-  console.log('[IG] 解析:', redactUrl(instagramUrl));
+  console.log('[ytdlp] 解析:', redactUrl(instagramUrl));
 
   const { stdout } = await runYtdlp(['-J', '--no-warnings', '--no-progress', instagramUrl]);
 
@@ -101,7 +97,7 @@ export async function fetchInstagramMedia(instagramUrl) {
     throw new Error('未找到可下载的媒体');
   }
 
-  console.log('[IG] 找到', items.length, '个媒体');
+  console.log('[ytdlp] 找到', items.length, '个媒体');
   return items;
 }
 

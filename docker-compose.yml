@@ -7,7 +7,6 @@ services:
       ADMIN_TG_ID: ${ADMIN_TG_ID}
       CACHE_DIR: /tmp/ig-cache
       COOKIES_PATH: /data/cookies.txt
-      X_COOKIES_PATH: /data/x_cookies.txt
       DATA_DIR: /data
     volumes:
       - ig-cache:/tmp/ig-cache
