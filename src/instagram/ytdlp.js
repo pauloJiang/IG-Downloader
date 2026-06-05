@@ -10,6 +10,8 @@ const YTDLP_BIN = process.env.YTDLP_BIN || 'yt-dlp';
 export const IG_AUTH_ERROR =
   'Instagram 需要登录或当前IP被限流，请稍后再试或更新 cookies。';
 
+/** @typedef {'instagram' | 'x'} YtdlpPlatform */
+
 /**
  * @typedef {{ type: 'image' | 'video', url: string, playlistIndex?: number }} MediaItem
  */
@@ -28,8 +30,13 @@ export async function ensureYtdlp() {
 
 /**
  * @param {string} message
+ * @param {YtdlpPlatform} [platform]
  */
-export function mapYtdlpError(message) {
+export function mapYtdlpError(message, platform = 'instagram') {
+  if (platform === 'x') {
+    return new Error('X 视频下载失败，可能是私密内容、登录限制或链接无效。');
+  }
+
   const lower = message.toLowerCase();
   if (
     lower.includes('login required') ||
@@ -46,9 +53,11 @@ export function mapYtdlpError(message) {
 
 /**
  * @param {string[]} args
+ * @param {{ platform?: YtdlpPlatform }} [options]
  * @returns {Promise<{ stdout: string, stderr: string }>}
  */
-export async function runYtdlp(args) {
+export async function runYtdlp(args, options = {}) {
+  const platform = options.platform ?? 'instagram';
   const fullArgs = [...getYtdlpCookieArgs(), ...args];
 
   return new Promise((resolve, reject) => {
@@ -68,7 +77,7 @@ export async function runYtdlp(args) {
     proc.on('close', (code) => {
       if (code !== 0) {
         const msg = stderr.trim() || stdout.trim() || `yt-dlp 退出码 ${code}`;
-        reject(mapYtdlpError(msg.slice(0, 500)));
+        reject(mapYtdlpError(msg.slice(0, 500), platform));
         return;
       }
       resolve({ stdout, stderr });

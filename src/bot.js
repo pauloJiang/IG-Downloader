@@ -1,6 +1,5 @@
 import { Telegraf, Input } from 'telegraf';
 import { config } from './config.js';
-import { parseInstagramUrl, containsInstagramUrl } from './instagram/url.js';
 import { fetchInstagramMedia } from './instagram/fetcher.js';
 import { downloadToCache } from './cache/manager.js';
 import { prepareVideoForTelegram } from './video/prepare-video.js';
@@ -9,14 +8,18 @@ import { registerAdminCommands } from './admin/commands.js';
 import { setNotifyBot, notifyAdminCookieFailure } from './admin/notify.js';
 import { getUserFacingIgError } from './admin/cookie-errors.js';
 import { markProcessed } from './admin/stats.js';
+import { parseSupportedLink, containsSupportedLink } from './platforms/link.js';
+import { downloadXVideo, X_DOWNLOAD_ERROR } from './x/download.js';
 
 const HELP_TEXT = `📖 *使用帮助*
 
-发送 Instagram 链接，Bot 会自动识别并下载媒体：
+发送 Instagram 或 X/Twitter 链接，Bot 会自动识别并下载媒体：
 
 • \`instagram.com/reel/\` — Reels 短视频
 • \`instagram.com/p/\` — 帖子（图片/视频/轮播）
 • \`instagram.com/stories/\` — Stories 快拍
+• \`x.com/.../status/\` — X 视频
+• \`twitter.com/.../status/\` — Twitter 视频
 
 支持直接发送链接，或包含链接的消息文本。
 
@@ -63,6 +66,58 @@ async function handleIgDownloadError(ctx, statusMsg, rawMessage) {
 }
 
 /**
+ * @param {import('telegraf').Context} ctx
+ * @param {import('telegraf').Types.Message.TextMessage} statusMsg
+ */
+async function handleXDownloadError(ctx, statusMsg) {
+  const message = `❌ ${X_DOWNLOAD_ERROR}`;
+  await ctx.telegram
+    .editMessageText(ctx.chat.id, statusMsg.message_id, undefined, message)
+    .catch(() => ctx.reply(message));
+}
+
+/**
+ * @param {import('telegraf').Context} ctx
+ * @param {import('telegraf').Types.Message.TextMessage} statusMsg
+ * @param {{ url: string }} link
+ */
+async function handleInstagramDownload(ctx, statusMsg, link) {
+  const mediaItems = await fetchInstagramMedia(link.url);
+
+  if (!mediaItems.length) {
+    await ctx.telegram.editMessageText(
+      ctx.chat.id,
+      statusMsg.message_id,
+      undefined,
+      '❌ 未找到可下载的媒体。',
+    );
+    return;
+  }
+
+  for (const item of mediaItems) {
+    const cached = await downloadToCache(item.url, item.type, {
+      playlistIndex: item.playlistIndex,
+    });
+    await sendMediaFile(ctx, cached);
+  }
+
+  markProcessed();
+  await ctx.telegram.deleteMessage(ctx.chat.id, statusMsg.message_id).catch(() => {});
+}
+
+/**
+ * @param {import('telegraf').Context} ctx
+ * @param {import('telegraf').Types.Message.TextMessage} statusMsg
+ * @param {{ url: string }} link
+ */
+async function handleXDownload(ctx, statusMsg, link) {
+  const cached = await downloadXVideo(link.url);
+  await sendMediaFile(ctx, cached);
+  markProcessed();
+  await ctx.telegram.deleteMessage(ctx.chat.id, statusMsg.message_id).catch(() => {});
+}
+
+/**
  * @returns {import('telegraf').Telegraf}
  */
 export function createBot() {
@@ -91,8 +146,8 @@ export function createBot() {
 
   bot.start(async (ctx) => {
     await ctx.reply(
-      '👋 欢迎使用 Instagram 下载 Bot！\n\n' +
-        '直接发送 Instagram 链接（帖子 / Reels / Stories），我会把图片或视频发给你。\n\n' +
+      '👋 欢迎使用 Instagram / X 下载 Bot！\n\n' +
+        '直接发送 Instagram 或 X/Twitter 链接，我会把图片或视频发给你。\n\n' +
         '输入 /help 查看详细说明。',
       { parse_mode: 'Markdown' },
     );
@@ -107,39 +162,29 @@ export function createBot() {
 
     if (text.startsWith('/')) return;
 
-    if (!containsInstagramUrl(text)) return;
+    if (!containsSupportedLink(text)) return;
 
-    const parsed = parseInstagramUrl(text);
-    if (!parsed) {
-      await ctx.reply('❌ 无法识别 Instagram 链接，请检查后重试。');
+    const link = parseSupportedLink(text);
+    if (!link) {
+      await ctx.reply('❌ 无法识别链接，请检查后重试。');
       return;
     }
 
     const statusMsg = await ctx.reply('⏳ 正在解析并下载，请稍候…');
 
     try {
-      const mediaItems = await fetchInstagramMedia(parsed.url);
-
-      if (!mediaItems.length) {
-        await ctx.telegram.editMessageText(
-          ctx.chat.id,
-          statusMsg.message_id,
-          undefined,
-          '❌ 未找到可下载的媒体。',
-        );
+      if (link.platform === 'instagram') {
+        await handleInstagramDownload(ctx, statusMsg, link);
         return;
       }
 
-      for (const item of mediaItems) {
-        const cached = await downloadToCache(item.url, item.type, {
-          playlistIndex: item.playlistIndex,
-        });
-        await sendMediaFile(ctx, cached);
+      await handleXDownload(ctx, statusMsg, link);
+    } catch (err) {
+      if (link.platform === 'x') {
+        await handleXDownloadError(ctx, statusMsg);
+        return;
       }
 
-      markProcessed();
-      await ctx.telegram.deleteMessage(ctx.chat.id, statusMsg.message_id).catch(() => {});
-    } catch (err) {
       const rawMessage = err instanceof Error ? err.message : '未知错误';
       await handleIgDownloadError(ctx, statusMsg, rawMessage);
     }

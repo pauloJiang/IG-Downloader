@@ -20,7 +20,7 @@ async function ensureDir(dir) {
  * @param {string} outTemplate
  * @param {string} downloadUrl
  * @param {'image' | 'video'} type
- * @param {{ playlistIndex?: number }} [options]
+ * @param {{ playlistIndex?: number, platform?: 'instagram' | 'x' }} [options]
  */
 function buildYtdlpDownloadArgs(outTemplate, downloadUrl, type, options = {}) {
   const args = [
@@ -56,7 +56,7 @@ function buildYtdlpDownloadArgs(outTemplate, downloadUrl, type, options = {}) {
 /**
  * @param {string} downloadUrl
  * @param {'image' | 'video'} type
- * @param {{ playlistIndex?: number }} [options]
+ * @param {{ playlistIndex?: number, platform?: 'instagram' | 'x' }} [options]
  * @returns {Promise<{ filePath: string, type: 'image' | 'video' }>}
  */
 export async function downloadToCache(downloadUrl, type, options = {}) {
@@ -70,7 +70,7 @@ export async function downloadToCache(downloadUrl, type, options = {}) {
   const args = buildYtdlpDownloadArgs(outTemplate, downloadUrl, type, options);
   console.log('[ytdlp] 命令:', args.filter((a) => !a.startsWith('http')).join(' '));
 
-  await runYtdlp(args);
+  await runYtdlp(args, { platform: options.platform ?? 'instagram' });
 
   const filePath = await resolveDownloadedFile(id);
   await logDownloadStreams(filePath);
