@@ -1,6 +1,7 @@
 import { parseInstagramUrl } from './url.js';
 import { fetchInstagramMedia } from './fetcher.js';
 import { downloadToCache } from '../cache/manager.js';
+import { prepareIgVideoForSend } from './video.js';
 import { notifyAdminCookieFailure } from '../admin/notify.js';
 import { getUserFacingIgError } from '../admin/cookie-errors.js';
 import { markProcessed } from '../admin/stats.js';
@@ -11,7 +12,8 @@ import { markProcessed } from '../admin/stats.js';
  */
 async function sendMediaFile(ctx, file) {
   if (file.type === 'video') {
-    await ctx.replyWithVideo({ source: file.filePath });
+    const sendPath = await prepareIgVideoForSend(file.filePath);
+    await ctx.replyWithVideo({ source: sendPath });
     return;
   }
 
