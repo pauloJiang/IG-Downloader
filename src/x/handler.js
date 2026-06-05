@@ -21,7 +21,7 @@ function logXYtdlpStderr(err) {
  * @param {string} text
  */
 export async function handleX(ctx, text) {
-  console.log('[X] received');
+  console.log('[X ONLY] start');
 
   const parsed = parseXUrl(text);
   if (!parsed) {

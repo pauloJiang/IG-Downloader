@@ -74,8 +74,16 @@ export async function initXCacheDir() {
  * @param {string} url
  * @returns {Promise<{ filePath: string }>}
  */
-export async function downloadXVideo(url) {
+let xCacheReady = false;
+
+async function ensureXCacheDir() {
+  if (xCacheReady) return;
   await initXCacheDir();
+  xCacheReady = true;
+}
+
+export async function downloadXVideo(url) {
+  await ensureXCacheDir();
 
   const videoId = await fetchXVideoId(url);
   const outTemplate = path.join(config.xCacheDir, '%(id)s.%(ext)s');

@@ -4,8 +4,6 @@ import { createBot } from './bot.js';
 import { ensureYtdlp } from './instagram/ytdlp.js';
 import { initIgCookies } from './instagram/cookies.js';
 import { initWhitelist } from './admin/whitelist.js';
-import { initXCacheDir } from './x/download.js';
-
 async function main() {
   if (!config.botToken) {
     console.error('错误：请通过环境变量 BOT_TOKEN 传入 Token（不要写入本地文件）');
@@ -20,7 +18,6 @@ async function main() {
   await initIgCookies();
   await initWhitelist();
   await initCacheDir();
-  await initXCacheDir();
 
   const bot = createBot();
 
