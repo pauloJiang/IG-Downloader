@@ -146,37 +146,6 @@ export function canSendWithoutTranscode(probe, hasAudio) {
 }
 
 /**
- * IG 编码直发条件：h264 + yuv420p + aac（有音频时）。
- * @param {MediaProbe} probe
- * @param {boolean} hasAudio
- */
-export function canIgSkipTranscode(probe, hasAudio) {
-  if (!probe.video) return false;
-  if (probe.video.codec_name !== 'h264') return false;
-  if (probe.video.pix_fmt !== 'yuv420p') return false;
-  if (hasAudio) {
-    if (!probe.audio || probe.audio.codec_name !== 'aac') return false;
-  }
-  return true;
-}
-
-const IG_INCOMPATIBLE_CODEC_LABELS = {
-  vp9: 'VP9',
-  hevc: 'HEVC',
-  av1: 'AV1',
-};
-
-/**
- * @param {MediaProbe} probe
- * @returns {string | null}
- */
-export function getIgIncompatibleCodecLabel(probe) {
-  const codec = probe.video?.codec_name?.toLowerCase();
-  if (!codec) return null;
-  return IG_INCOMPATIBLE_CODEC_LABELS[codec] ?? null;
-}
-
-/**
  * @param {string} filePath
  * @param {string} label
  * @param {MediaProbe} probe

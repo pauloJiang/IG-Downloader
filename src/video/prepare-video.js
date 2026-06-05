@@ -8,26 +8,19 @@ import {
   probeMedia,
   logProbeResult,
   canSendWithoutTranscode,
-  canIgSkipTranscode,
 } from './ffprobe-log.js';
 
 const FFMPEG_BIN = process.env.FFMPEG_BIN || 'ffmpeg';
 const MIN_VIDEO_BYTES = 100_000;
-const IG_VIDEO_SCALE_FILTER =
-  "scale='if(gt(iw,720),720,iw)':-2,fps=30,format=yuv420p";
 const X_VIDEO_SCALE_FILTER =
   "scale='if(gt(iw,1080),1080,iw)':-2,fps=30,format=yuv420p";
-const IG_ENCODE = { profile: 'baseline', level: '3.1', preset: 'veryfast', crf: '23' };
-export const IG_ASPECT_RATIO_ERROR = '视频比例异常，已取消发送';
 const X_ENCODE = { profile: 'main', level: '4.0', preset: 'veryfast', crf: '23' };
 const ASPECT_RATIO_MAX_DRIFT = 0.01;
 
-/** @typedef {'instagram' | 'x'} VideoPlatform */
 /** @typedef {{ profile: string, level: string, preset: string, crf: string }} EncodeOptions */
 
 /**
- * @typedef {{ probeInputMs: number, ffmpegMs: number, probeOutputMs: number }} VideoPerfStats
- * @typedef {{ path: string, sendAs: 'video' | 'document', perf?: VideoPerfStats }} PreparedVideo
+ * @typedef {{ path: string, sendAs: 'video' | 'document' }} PreparedVideo
  */
 
 /**
@@ -75,16 +68,14 @@ function getAspectRatio(width, height) {
 /**
  * @param {import('./ffprobe-log.js').MediaProbe} inputProbe
  * @param {import('./ffprobe-log.js').MediaProbe} outputProbe
- * @param {{ logTag?: string, aspectRatioError?: string }} [options]
  */
-function assertAspectRatioPreserved(inputProbe, outputProbe, options = {}) {
-  const logTag = options.logTag ?? '[x]';
+function assertAspectRatioPreserved(inputProbe, outputProbe) {
   const inW = inputProbe.video?.width;
   const inH = inputProbe.video?.height;
   const outW = outputProbe.video?.width;
   const outH = outputProbe.video?.height;
 
-  console.log(`${logTag} 发送前尺寸对比:`, {
+  console.log('[x] 发送前尺寸对比:', {
     input: { width: inW, height: inH },
     output: { width: outW, height: outH },
   });
@@ -96,7 +87,7 @@ function assertAspectRatioPreserved(inputProbe, outputProbe, options = {}) {
   }
 
   const drift = Math.abs(inRatio - outRatio) / inRatio;
-  console.log(`${logTag} 宽高比:`, {
+  console.log('[x] 宽高比:', {
     input: inRatio.toFixed(6),
     output: outRatio.toFixed(6),
     driftPercent: `${(drift * 100).toFixed(3)}%`,
@@ -104,24 +95,9 @@ function assertAspectRatioPreserved(inputProbe, outputProbe, options = {}) {
 
   if (drift > ASPECT_RATIO_MAX_DRIFT) {
     throw new Error(
-      options.aspectRatioError ??
-        `比例异常: 输入 ${inW}x${inH} → 输出 ${outW}x${outH}，偏差 ${(drift * 100).toFixed(2)}%`,
+      `比例异常: 输入 ${inW}x${inH} → 输出 ${outW}x${outH}，偏差 ${(drift * 100).toFixed(2)}%`,
     );
   }
-}
-
-/**
- * @param {import('./ffprobe-log.js').MediaProbe} inputProbe
- * @param {string} outputPath
- */
-async function assertIgVideoBeforeSend(inputProbe, outputPath) {
-  const outputProbe = await probeMedia(outputPath);
-  logProbeResult(outputPath, 'IG 发送前验证', outputProbe);
-  assertAspectRatioPreserved(inputProbe, outputProbe, {
-    logTag: '[IG]',
-    aspectRatioError: IG_ASPECT_RATIO_ERROR,
-  });
-  console.log('[IG] 转码输出验证通过');
 }
 
 /**
@@ -152,26 +128,13 @@ async function assertXVideoBeforeSend(inputProbe, outputPath, requireAudio) {
 
 /**
  * @param {string} inputPath
- * @param {{ platform?: VideoPlatform, collectPerf?: boolean, inputProbe?: import('./ffprobe-log.js').MediaProbe }} [options]
+ * @param {{ platform?: 'x' }} [options]
  * @returns {Promise<PreparedVideo>}
  */
 export async function prepareVideoForTelegram(inputPath, options = {}) {
-  const platform = options.platform ?? 'instagram';
-  const collectPerf = options.collectPerf === true;
-  const reuseIgProbe = platform === 'instagram' && options.inputProbe;
-  let probeInputMs = 0;
-  let ffmpegMs = 0;
-  let probeOutputMs = 0;
-
   let before;
   try {
-    if (reuseIgProbe) {
-      before = options.inputProbe;
-    } else {
-      const probeInputStart = Date.now();
-      before = await probeMedia(inputPath);
-      probeInputMs = Date.now() - probeInputStart;
-    }
+    before = await probeMedia(inputPath);
   } catch (err) {
     const reason = err instanceof Error ? err.message : String(err);
     throw new Error(`ffprobe 失败: ${reason}`);
@@ -194,89 +157,44 @@ export async function prepareVideoForTelegram(inputPath, options = {}) {
     pix_fmt: before.video?.pix_fmt,
     audio_codec: before.audio?.codec_name ?? '(none)',
   });
-  if (!(platform === 'instagram' && reuseIgProbe)) {
-    logProbeResult(inputPath, '输入', before);
-  }
+  logProbeResult(inputPath, '输入', before);
 
   if (inputSize <= MIN_VIDEO_BYTES) {
     throw new Error(`原视频文件过小: ${inputSize} bytes`);
   }
 
-  let shouldSkipTranscode = false;
-  if (platform === 'instagram') {
-    shouldSkipTranscode = canIgSkipTranscode(before, hasAudio);
-
-    if (shouldSkipTranscode) {
-      console.log('[IG] compatible detected, skip ffmpeg');
-    } else {
-      console.log('[IG] incompatible, start ffmpeg');
-    }
-  } else {
-    shouldSkipTranscode = canSendWithoutTranscode(before, hasAudio);
-  }
+  const shouldSkipTranscode = canSendWithoutTranscode(before, hasAudio);
 
   if (shouldSkipTranscode) {
-    if (platform === 'instagram') {
-      // logged above
-    } else {
-      console.log('🚀 兼容视频，直接发送');
-      console.log('[x] 直发尺寸:', {
-        width: before.video?.width,
-        height: before.video?.height,
-      });
-    }
-    const skipped = { path: inputPath, sendAs: 'video' };
-    if (collectPerf) {
-      skipped.perf = { probeInputMs, ffmpegMs: 0, probeOutputMs: 0 };
-    }
-    return skipped;
+    console.log('🚀 兼容视频，直接发送');
+    console.log('[x] 直发尺寸:', {
+      width: before.video?.width,
+      height: before.video?.height,
+    });
+    return { path: inputPath, sendAs: 'video' };
   }
 
-  if (platform !== 'instagram') {
-    console.log('🔄 检测到不兼容编码，开始转码');
-  }
-  const scaleFilter = platform === 'instagram' ? IG_VIDEO_SCALE_FILTER : X_VIDEO_SCALE_FILTER;
-  const encode = platform === 'instagram' ? IG_ENCODE : X_ENCODE;
+  console.log('🔄 检测到不兼容编码，开始转码');
   const outputPath = path.join(config.cacheDir, `${randomUUID()}-ios.mp4`);
-  console.log(`[video] ${platform === 'instagram' ? 'IG' : 'X'} 转码, hasAudio=`, hasAudio);
+  console.log('[video] X 转码, hasAudio=', hasAudio);
 
   try {
-    const ffmpegStart = Date.now();
-    transcodeToIosMp4(inputPath, outputPath, hasAudio, scaleFilter, encode);
+    transcodeToIosMp4(inputPath, outputPath, hasAudio, X_VIDEO_SCALE_FILTER, X_ENCODE);
     await assertTranscodeOutput(outputPath);
-    ffmpegMs = Date.now() - ffmpegStart;
-
-    const probeOutputStart = Date.now();
-    if (platform === 'x') {
-      await assertXVideoBeforeSend(before, outputPath, hasAudio);
-    } else {
-      await assertIgVideoBeforeSend(before, outputPath);
-    }
-    probeOutputMs = Date.now() - probeOutputStart;
+    await assertXVideoBeforeSend(before, outputPath, hasAudio);
 
     scheduleCacheDeletion(outputPath);
-    const prepared = { path: outputPath, sendAs: 'video' };
-    if (collectPerf) {
-      prepared.perf = { probeInputMs, ffmpegMs, probeOutputMs };
-    }
-    return prepared;
+    return { path: outputPath, sendAs: 'video' };
   } catch (err) {
     if (fs.existsSync(outputPath)) {
       fs.unlinkSync(outputPath);
     }
 
     const reason = err instanceof Error ? err.message : String(err);
-
-    if (platform === 'instagram') {
-      if (reason === IG_ASPECT_RATIO_ERROR || reason.includes('比例异常')) {
-        throw new Error(IG_ASPECT_RATIO_ERROR);
-      }
-      throw new Error(`IG 视频转码失败: ${reason}`);
-    }
-
     const inputExists = fs.existsSync(inputPath);
-    const inputSize = getFileSize(inputPath);
-    if (inputExists && inputSize > MIN_VIDEO_BYTES) {
+    const fallbackSize = getFileSize(inputPath);
+
+    if (inputExists && fallbackSize > MIN_VIDEO_BYTES) {
       console.warn('[x] 转码/验证失败，使用原文件 replyWithVideo:', reason);
       return { path: inputPath, sendAs: 'video' };
     }

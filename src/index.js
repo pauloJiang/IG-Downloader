@@ -26,8 +26,11 @@ async function main() {
   const bot = createBot();
 
   bot.catch((err, ctx) => {
-    console.error('Bot error:', err);
-    ctx.reply('❌ 发生内部错误，请稍后重试。').catch(() => {});
+    console.error('[IG ERROR]', err);
+    if (err instanceof Error && err.stack) {
+      console.error('[IG ERROR] stack:', err.stack);
+    }
+    ctx.reply('❌ 处理失败，请稍后重试').catch(() => {});
   });
 
   console.log('Telegram IG Bot 启动中…');

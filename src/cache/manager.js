@@ -4,7 +4,7 @@ import { randomUUID } from 'node:crypto';
 import { config } from '../config.js';
 import { redactUrl } from '../http/fetch-helper.js';
 import { runYtdlp } from '../instagram/ytdlp.js';
-import { probeMedia } from '../video/ffprobe-log.js';
+import { logDownloadStreams, hasAudioStream } from '../video/ffprobe-log.js';
 
 /** @type {Map<string, NodeJS.Timeout>} */
 const deletionTimers = new Map();
@@ -57,7 +57,7 @@ function buildYtdlpDownloadArgs(outTemplate, downloadUrl, type, options = {}) {
  * @param {string} downloadUrl
  * @param {'image' | 'video'} type
  * @param {{ playlistIndex?: number }} [options]
- * @returns {Promise<{ filePath: string, type: 'image' | 'video', probe?: import('../video/ffprobe-log.js').MediaProbe, probeInputMs?: number }>}
+ * @returns {Promise<{ filePath: string, type: 'image' | 'video' }>}
  */
 export async function downloadToCache(downloadUrl, type, options = {}) {
   await ensureDir(config.cacheDir);
@@ -65,33 +65,22 @@ export async function downloadToCache(downloadUrl, type, options = {}) {
   const id = randomUUID();
   const outTemplate = path.join(config.cacheDir, `${id}.%(ext)s`);
 
-  console.log('[IG] 下载:', redactUrl(downloadUrl), 'type=', type, 'item=', options.playlistIndex ?? 'all');
+  console.log('[ytdlp] 下载:', redactUrl(downloadUrl), 'type=', type, 'item=', options.playlistIndex ?? 'all');
 
   const args = buildYtdlpDownloadArgs(outTemplate, downloadUrl, type, options);
-  console.log('[IG] yt-dlp 命令:', args.filter((a) => !a.startsWith('http')).join(' '));
+  console.log('[ytdlp] 命令:', args.filter((a) => !a.startsWith('http')).join(' '));
 
   await runYtdlp(args);
 
   const filePath = await resolveDownloadedFile(id);
+  await logDownloadStreams(filePath);
 
-  if (type === 'video') {
-    const probeStart = Date.now();
-    const probe = await probeMedia(filePath);
-    const probeInputMs = Date.now() - probeStart;
-
-    console.log('[IG] post-download probe:', {
-      video_codec: probe.video?.codec_name,
-      pix_fmt: probe.video?.pix_fmt,
-      audio_codec: probe.audio?.codec_name ?? '(none)',
-      width: probe.video?.width,
-      height: probe.video?.height,
-    });
-
-    scheduleCacheDeletion(filePath);
-    return { filePath, type, probe, probeInputMs };
+  if (type === 'video' && !(await hasAudioStream(filePath))) {
+    console.log('🎬 视频无音频轨，已按静音视频处理');
   }
 
   scheduleCacheDeletion(filePath);
+
   return { filePath, type };
 }
 
