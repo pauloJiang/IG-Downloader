@@ -33,3 +33,11 @@ export function parseXUrl(text) {
   if (!url) return null;
   return { url };
 }
+
+/**
+ * @param {string} url
+ */
+export function isXUrl(url) {
+  const lower = url.toLowerCase();
+  return lower.includes('x.com') || lower.includes('twitter.com');
+}

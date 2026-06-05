@@ -4,6 +4,7 @@ import { getBotCommand, isAllowed } from './admin/auth.js';
 import { registerAdminCommands } from './admin/commands.js';
 import { setNotifyBot } from './admin/notify.js';
 import { handleInstagram } from './instagram/handler.js';
+import { isInstagramUrl } from './instagram/url.js';
 
 const HELP_TEXT = `📖 *使用帮助*
 
@@ -22,9 +23,18 @@ const HELP_TEXT = `📖 *使用帮助*
 
 *说明：*
 • 使用 yt-dlp 解析与下载
-• 非 H.264 视频会自动转码后再发送
 • 轮播帖会逐条发送所有媒体
 • 下载文件缓存 30 分钟后自动删除`;
+
+/**
+ * @param {string} text
+ * @returns {string}
+ */
+function extractUrlFromText(text) {
+  const match = text.match(/https?:\/\/[^\s]+/i);
+  if (!match) return text;
+  return match[0].replace(/[)>]+$/g, '');
+}
 
 /**
  * @returns {import('telegraf').Telegraf}
@@ -71,14 +81,15 @@ export function createBot() {
 
     if (text.startsWith('/')) return;
 
-    const lower = text.toLowerCase();
+    const url = extractUrlFromText(text);
 
-    if (lower.includes('instagram.com')) {
+    if (isInstagramUrl(url)) {
       await handleInstagram(ctx, text);
       return;
     }
 
-    if (lower.includes('x.com') || lower.includes('twitter.com')) {
+    const { isXUrl } = await import('./x/url.js');
+    if (isXUrl(url)) {
       const { handleX } = await import('./x/handler.js');
       await handleX(ctx, text);
       return;

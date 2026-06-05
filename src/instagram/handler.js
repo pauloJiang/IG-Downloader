@@ -1,8 +1,6 @@
-import { Input } from 'telegraf';
 import { parseInstagramUrl } from './url.js';
 import { fetchInstagramMedia } from './fetcher.js';
 import { downloadToCache } from '../cache/manager.js';
-import { prepareVideoForTelegram } from '../video/prepare-video.js';
 import { notifyAdminCookieFailure } from '../admin/notify.js';
 import { getUserFacingIgError } from '../admin/cookie-errors.js';
 import { markProcessed } from '../admin/stats.js';
@@ -13,17 +11,11 @@ import { markProcessed } from '../admin/stats.js';
  */
 async function sendMediaFile(ctx, file) {
   if (file.type === 'video') {
-    const prepared = await prepareVideoForTelegram(file.filePath);
-
-    if (prepared.sendAs === 'document') {
-      await ctx.replyWithDocument(Input.fromLocalFile(prepared.path));
-      return;
-    }
-
-    await ctx.replyWithVideo(Input.fromLocalFile(prepared.path));
-  } else {
-    await ctx.replyWithPhoto(Input.fromLocalFile(file.filePath));
+    await ctx.replyWithVideo({ source: file.filePath });
+    return;
   }
+
+  await ctx.replyWithPhoto({ source: file.filePath });
 }
 
 /**
