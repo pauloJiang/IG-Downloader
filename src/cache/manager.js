@@ -4,7 +4,7 @@ import { randomUUID } from 'node:crypto';
 import { config } from '../config.js';
 import { redactUrl } from '../http/fetch-helper.js';
 import { runYtdlp } from '../instagram/ytdlp.js';
-import { logDownloadStreams } from '../video/ffprobe-log.js';
+import { probeMedia } from '../video/ffprobe-log.js';
 
 /** @type {Map<string, NodeJS.Timeout>} */
 const deletionTimers = new Map();
@@ -57,7 +57,7 @@ function buildYtdlpDownloadArgs(outTemplate, downloadUrl, type, options = {}) {
  * @param {string} downloadUrl
  * @param {'image' | 'video'} type
  * @param {{ playlistIndex?: number }} [options]
- * @returns {Promise<{ filePath: string, type: 'image' | 'video' }>}
+ * @returns {Promise<{ filePath: string, type: 'image' | 'video', probe?: import('../video/ffprobe-log.js').MediaProbe, probeInputMs?: number }>}
  */
 export async function downloadToCache(downloadUrl, type, options = {}) {
   await ensureDir(config.cacheDir);
@@ -73,10 +73,25 @@ export async function downloadToCache(downloadUrl, type, options = {}) {
   await runYtdlp(args);
 
   const filePath = await resolveDownloadedFile(id);
-  await logDownloadStreams(filePath);
+
+  if (type === 'video') {
+    const probeStart = Date.now();
+    const probe = await probeMedia(filePath);
+    const probeInputMs = Date.now() - probeStart;
+
+    console.log('[IG] post-download probe:', {
+      video_codec: probe.video?.codec_name,
+      pix_fmt: probe.video?.pix_fmt,
+      audio_codec: probe.audio?.codec_name ?? '(none)',
+      width: probe.video?.width,
+      height: probe.video?.height,
+    });
+
+    scheduleCacheDeletion(filePath);
+    return { filePath, type, probe, probeInputMs };
+  }
 
   scheduleCacheDeletion(filePath);
-
   return { filePath, type };
 }
 

@@ -9,7 +9,6 @@ import {
   logProbeResult,
   canSendWithoutTranscode,
   canIgSkipTranscode,
-  getIgIncompatibleCodecLabel,
 } from './ffprobe-log.js';
 
 const FFMPEG_BIN = process.env.FFMPEG_BIN || 'ffmpeg';
@@ -153,21 +152,26 @@ async function assertXVideoBeforeSend(inputProbe, outputPath, requireAudio) {
 
 /**
  * @param {string} inputPath
- * @param {{ platform?: VideoPlatform, collectPerf?: boolean }} [options]
+ * @param {{ platform?: VideoPlatform, collectPerf?: boolean, inputProbe?: import('./ffprobe-log.js').MediaProbe }} [options]
  * @returns {Promise<PreparedVideo>}
  */
 export async function prepareVideoForTelegram(inputPath, options = {}) {
   const platform = options.platform ?? 'instagram';
   const collectPerf = options.collectPerf === true;
+  const reuseIgProbe = platform === 'instagram' && options.inputProbe;
   let probeInputMs = 0;
   let ffmpegMs = 0;
   let probeOutputMs = 0;
 
   let before;
   try {
-    const probeInputStart = Date.now();
-    before = await probeMedia(inputPath);
-    probeInputMs = Date.now() - probeInputStart;
+    if (reuseIgProbe) {
+      before = options.inputProbe;
+    } else {
+      const probeInputStart = Date.now();
+      before = await probeMedia(inputPath);
+      probeInputMs = Date.now() - probeInputStart;
+    }
   } catch (err) {
     const reason = err instanceof Error ? err.message : String(err);
     throw new Error(`ffprobe 失败: ${reason}`);
@@ -190,7 +194,9 @@ export async function prepareVideoForTelegram(inputPath, options = {}) {
     pix_fmt: before.video?.pix_fmt,
     audio_codec: before.audio?.codec_name ?? '(none)',
   });
-  logProbeResult(inputPath, '输入', before);
+  if (!(platform === 'instagram' && reuseIgProbe)) {
+    logProbeResult(inputPath, '输入', before);
+  }
 
   if (inputSize <= MIN_VIDEO_BYTES) {
     throw new Error(`原视频文件过小: ${inputSize} bytes`);
@@ -201,18 +207,9 @@ export async function prepareVideoForTelegram(inputPath, options = {}) {
     shouldSkipTranscode = canIgSkipTranscode(before, hasAudio);
 
     if (shouldSkipTranscode) {
-      console.log('🚀 原视频已兼容，跳过转码');
-      console.log('[IG] 直发尺寸:', {
-        width: before.video?.width,
-        height: before.video?.height,
-      });
+      console.log('[IG] compatible detected, skip ffmpeg');
     } else {
-      const codecLabel = getIgIncompatibleCodecLabel(before);
-      if (codecLabel) {
-        console.log(`🔄 检测到 ${codecLabel}，开始转码`);
-      } else {
-        console.log('🔄 编码不符合 h264/aac/yuv420p，开始转码');
-      }
+      console.log('[IG] incompatible, start ffmpeg');
     }
   } else {
     shouldSkipTranscode = canSendWithoutTranscode(before, hasAudio);

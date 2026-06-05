@@ -31,7 +31,7 @@ async function replyIgError(ctx, statusMsg, rawMessage) {
 
 /**
  * @param {import('telegraf').Context} ctx
- * @param {{ filePath: string, type: 'image' | 'video' }} file
+ * @param {{ filePath: string, type: 'image' | 'video', probe?: import('../video/ffprobe-log.js').MediaProbe, probeInputMs?: number }} file
  * @param {ReturnType<typeof createIgPerfTotals>} perf
  */
 async function sendIgMedia(ctx, file, perf) {
@@ -41,10 +41,10 @@ async function sendIgMedia(ctx, file, perf) {
     const prepared = await prepareVideoForTelegram(file.filePath, {
       platform: 'instagram',
       collectPerf: true,
+      inputProbe: file.probe,
     });
 
     if (prepared.perf) {
-      perf.probeInputMs += prepared.perf.probeInputMs;
       perf.ffmpegMs += prepared.perf.ffmpegMs;
       perf.probeOutputMs += prepared.perf.probeOutputMs;
     }
@@ -112,6 +112,9 @@ export async function handleInstagram(ctx, text) {
       const cached = await downloadToCache(item.url, item.type, {
         playlistIndex: item.playlistIndex,
       });
+      if (cached.probeInputMs) {
+        perf.probeInputMs += cached.probeInputMs;
+      }
       cachedItems.push(cached);
     }
 
