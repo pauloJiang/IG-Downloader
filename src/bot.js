@@ -38,10 +38,13 @@ const HELP_TEXT = `📖 *使用帮助*
 /**
  * @param {import('telegraf').Context} ctx
  * @param {{ filePath: string, type: 'image' | 'video' }} file
+ * @param {{ platform?: 'instagram' | 'x' }} [options]
  */
-async function sendMediaFile(ctx, file) {
+async function sendMediaFile(ctx, file, options = {}) {
   if (file.type === 'video') {
-    const prepared = await prepareVideoForTelegram(file.filePath);
+    const prepared = await prepareVideoForTelegram(file.filePath, {
+      platform: options.platform ?? 'instagram',
+    });
 
     if (prepared.sendAs === 'document') {
       await ctx.replyWithDocument(Input.fromLocalFile(prepared.path));
@@ -98,7 +101,7 @@ async function handleInstagramDownload(ctx, statusMsg, link) {
     const cached = await downloadToCache(item.url, item.type, {
       playlistIndex: item.playlistIndex,
     });
-    await sendMediaFile(ctx, cached);
+    await sendMediaFile(ctx, cached, { platform: 'instagram' });
   }
 
   markProcessed();
@@ -112,7 +115,7 @@ async function handleInstagramDownload(ctx, statusMsg, link) {
  */
 async function handleXDownload(ctx, statusMsg, link) {
   const cached = await downloadXVideo(link.url);
-  await sendMediaFile(ctx, cached);
+  await sendMediaFile(ctx, cached, { platform: 'x' });
   markProcessed();
   await ctx.telegram.deleteMessage(ctx.chat.id, statusMsg.message_id).catch(() => {});
 }

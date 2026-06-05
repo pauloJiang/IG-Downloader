@@ -13,8 +13,11 @@ import {
 
 const FFMPEG_BIN = process.env.FFMPEG_BIN || 'ffmpeg';
 const MIN_VIDEO_BYTES = 100_000;
-const SCALE_MAX_WIDTH = Number(process.env.VIDEO_SCALE_MAX_WIDTH) || 1080;
-const VIDEO_SCALE_FILTER = `scale='if(gt(iw,${SCALE_MAX_WIDTH}),${SCALE_MAX_WIDTH},iw)':-2,fps=30,format=yuv420p`;
+const IG_VIDEO_SCALE_FILTER = "scale='min(720,iw)':-2,fps=30,format=yuv420p";
+const X_SCALE_MAX_WIDTH = Number(process.env.VIDEO_SCALE_MAX_WIDTH) || 1080;
+const X_VIDEO_SCALE_FILTER = `scale='if(gt(iw,${X_SCALE_MAX_WIDTH}),${X_SCALE_MAX_WIDTH},iw)':-2,fps=30,format=yuv420p`;
+
+/** @typedef {'instagram' | 'x'} VideoPlatform */
 
 /**
  * @typedef {{ path: string, sendAs: 'video' | 'document' }} PreparedVideo
@@ -66,9 +69,12 @@ async function assertIosMp4BeforeSend(filePath, requireAudio) {
 
 /**
  * @param {string} inputPath
+ * @param {{ platform?: VideoPlatform }} [options]
  * @returns {Promise<PreparedVideo>}
  */
-export async function prepareVideoForTelegram(inputPath) {
+export async function prepareVideoForTelegram(inputPath, options = {}) {
+  const platform = options.platform ?? 'instagram';
+  const forceTranscode = platform === 'instagram';
   let before;
   try {
     before = await probeMedia(inputPath);
@@ -100,28 +106,36 @@ export async function prepareVideoForTelegram(inputPath) {
     throw new Error(`原视频文件过小: ${inputSize} bytes`);
   }
 
-  if (canSendWithoutTranscode(before, hasAudio)) {
+  if (!forceTranscode && canSendWithoutTranscode(before, hasAudio)) {
     console.log('[video] h264 + yuv420p + aac/无音频，跳过转码直接发送');
     return { path: inputPath, sendAs: 'video' };
   }
 
+  const scaleFilter = forceTranscode ? IG_VIDEO_SCALE_FILTER : X_VIDEO_SCALE_FILTER;
   const outputPath = path.join(config.cacheDir, `${randomUUID()}-ios.mp4`);
-  console.log('[video] 需要转码为 iOS 兼容 MP4, hasAudio=', hasAudio);
+  console.log(
+    `[video] ${forceTranscode ? 'IG 统一转码' : '转码'}为 iOS 兼容 MP4, hasAudio=`,
+    hasAudio,
+  );
 
   try {
-    transcodeToIosMp4(inputPath, outputPath, hasAudio);
+    transcodeToIosMp4(inputPath, outputPath, hasAudio, scaleFilter);
     await assertTranscodeOutput(outputPath);
     await assertIosMp4BeforeSend(outputPath, hasAudio);
     scheduleCacheDeletion(outputPath);
     return { path: outputPath, sendAs: 'video' };
   } catch (err) {
-    const reason = err instanceof Error ? err.message : String(err);
-    console.warn('[video] 转码/验证失败，改用原视频 document 发送:', reason);
-
     if (fs.existsSync(outputPath)) {
       fs.unlinkSync(outputPath);
     }
 
+    if (forceTranscode) {
+      const reason = err instanceof Error ? err.message : String(err);
+      throw new Error(`IG 视频转码失败: ${reason}`);
+    }
+
+    const reason = err instanceof Error ? err.message : String(err);
+    console.warn('[video] 转码/验证失败，改用原视频 document 发送:', reason);
     return { path: inputPath, sendAs: 'document' };
   }
 }
@@ -131,13 +145,13 @@ export async function prepareVideoForTelegram(inputPath) {
  * @param {string} outputPath
  * @param {boolean} hasAudio
  */
-function buildFfmpegArgs(inputPath, outputPath, hasAudio) {
+function buildFfmpegArgs(inputPath, outputPath, hasAudio, scaleFilter) {
   const args = [
     '-y',
     '-i',
     inputPath,
     '-vf',
-    VIDEO_SCALE_FILTER,
+    scaleFilter,
     '-c:v',
     'libx264',
     '-profile:v',
@@ -165,8 +179,8 @@ function buildFfmpegArgs(inputPath, outputPath, hasAudio) {
  * @param {string} outputPath
  * @param {boolean} hasAudio
  */
-function transcodeToIosMp4(inputPath, outputPath, hasAudio) {
-  const args = buildFfmpegArgs(inputPath, outputPath, hasAudio);
+function transcodeToIosMp4(inputPath, outputPath, hasAudio, scaleFilter) {
+  const args = buildFfmpegArgs(inputPath, outputPath, hasAudio, scaleFilter);
 
   console.log('[ffmpeg] 命令:', FFMPEG_BIN, args.join(' '));
 
